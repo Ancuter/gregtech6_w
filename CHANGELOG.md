@@ -28,6 +28,11 @@ middle of its own version — `6.0.0-1.20.1-alpha.N` — so the two release seri
 
 ## [Unreleased]
 
+### Fixed
+
+- **Explosives detonate again**: Boomstick, Dynamite and Strong Dynamite now break the surrounding blocks, drop them and play the explosion when they go off.
+- **Machines drop themselves when blown up**: GregTech machines and containers destroyed by any explosion drop their item instead of vanishing, and the fortune of the explosive applies to the blocks it breaks.
+
 ## [6.0.0-alpha.7] — modpack-safe saves, unified mud, and world mechanics behave again
 
 ### Added

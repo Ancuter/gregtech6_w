@@ -678,6 +678,20 @@ public class MultiTileEntityBlock extends Block implements IBlock, IItemGT, IBlo
 	// "gregtech:blocks/<regname>", BlockBehaviour.java:982-984), and there's no such JSON for procedural MTE registrations (no datagen/loot_table) ->
 	// an empty LootTable -> 0 items. aMeta below is unused by harvestBlock's body (same as in the 1.7.10 oracle) - passed as 0, the signature is kept.
 	@Override public void playerDestroy(Level aWorld, Player aPlayer, BlockPos aPos, BlockState aState, BlockEntity aBlockEntity, ItemStack aDestroyedWith) {harvestBlock(aWorld, aPlayer, aPos.getX(), aPos.getY(), aPos.getZ(), 0);}
+	// The MTE family has no loot table: every engine drop path except playerDestroy (explosions, pistons, destroyBlock)
+	// dropped nothing, while 1.7.10 served them all through getDrops(fortune) via LAST_BROKEN_TILEENTITY.
+	@Override protected java.util.List<ItemStack> getDrops(BlockState aState, net.minecraft.world.level.storage.loot.LootParams.Builder aParams) {
+		if (WD.explosionDropDenied(aParams)) return java.util.Collections.emptyList();
+		BlockEntity tBE = aParams.getOptionalParameter(net.minecraft.world.level.storage.loot.parameters.LootContextParams.BLOCK_ENTITY);
+		if (tBE == null) {
+			net.minecraft.world.phys.Vec3 tOrigin = aParams.getOptionalParameter(net.minecraft.world.level.storage.loot.parameters.LootContextParams.ORIGIN);
+			if (tOrigin == null) return super.getDrops(aState, aParams);
+			tBE = WD.te(aParams.getLevel(), net.minecraft.util.Mth.floor(tOrigin.x), net.minecraft.util.Mth.floor(tOrigin.y), net.minecraft.util.Mth.floor(tOrigin.z), T);
+		}
+		if (!(tBE instanceof IMTE_GetDrops tDrops)) return java.util.Collections.emptyList();
+		ArrayListNoNulls<ItemStack> rList = tDrops.getDrops(WD.lootFortune(aParams), WD.lootSilkTouch(aParams));
+		return rList == null ? java.util.Collections.emptyList() : rList;
+	}
 	// was aPlayer.level().getTileEntity(x,y,z) (1.7.10 World) -> the WD.te(...) center (the same approach as every other
 	// TE lookup in this file), not a direct engine call.
 	@Override public final ArrayList<String> getDebugInfo(Player aPlayer, int aX, int aY, int aZ, int aScanLevel) {BlockEntity aTileEntity = WD.te(aPlayer.level(), aX, aY, aZ, T); return aTileEntity instanceof IMTE_GetDebugInfo ? ((IMTE_GetDebugInfo)aTileEntity).getDebugInfo(aScanLevel) : null;}

@@ -752,12 +752,7 @@ public class PrefixBlock extends Block implements Runnable, EntityBlock, IBlockS
 		// BUG-024: the explosion-drop gate — CENTER WD.explosionDropDenied (1.7.10 Explosion.doExplosionB / ExplosionGT:175; consolidation, copies eradicated).
 		if (WD.explosionDropDenied(aParams)) return java.util.Collections.emptyList();
 		int tX = net.minecraft.util.Mth.floor(tOrigin.x), tY = net.minecraft.util.Mth.floor(tOrigin.y), tZ = net.minecraft.util.Mth.floor(tOrigin.z);
-		int tFortune = 0; boolean tSilkTouch = F;
-		net.minecraft.world.entity.Entity tEntity = aParams.getOptionalParameter(net.minecraft.world.level.storage.loot.parameters.LootContextParams.THIS_ENTITY);
-		if (tEntity instanceof net.minecraft.world.entity.LivingEntity tLiving) {
-			tFortune = EnchantmentHelper.getEnchantmentLevel(tLevel.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT).getOrThrow(net.minecraft.world.item.enchantment.Enchantments.FORTUNE), tLiving);
-			tSilkTouch = EnchantmentHelper.getEnchantmentLevel(tLevel.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT).getOrThrow(net.minecraft.world.item.enchantment.Enchantments.SILK_TOUCH), tLiving) > 0;
-		}
+		int tFortune = WD.lootFortune(aParams); boolean tSilkTouch = WD.lootSilkTouch(aParams);
 		ArrayList<ItemStack> rDrops = mDrops.getDrops(this, tLevel, tX, tY, tZ, tFortune, tSilkTouch);
 		return rDrops == null ? java.util.Collections.emptyList() : rDrops;
 	}
