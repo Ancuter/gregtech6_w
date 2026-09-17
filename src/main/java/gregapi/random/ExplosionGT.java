@@ -65,17 +65,8 @@ import net.minecraft.world.level.ServerExplosion;
 import net.minecraft.world.level.Level;
 import net.minecraft.server.level.ServerLevel;
 
-/**
- * @author Gregorius Techneticies
- *
- * F-explosion: 1.7.10 {@code extends Explosion} (класс-контейнер полей explosionX/Y/Z, exploder,
- * affectedBlockPositions) -> neo {@code Explosion} стал ЧИСТЫМ интерфейсом (level/center/radius/...), а
- * конкретная реализация {@code ServerExplosion} (единственный класс движка, implements Explosion) требуется
- * ДОСЛОВНО типом в контрактах {@code EventHooks.onExplosionStart/onExplosionDetonate} (принимают ИМЕННО
- * ServerExplosion, не интерфейс) — поэтому ExplosionGT extends ServerExplosion (не implements Explosion
- * напрямую), а все 1.7.10-поля (explosionX/Y/Z, exploder, isFlaming, isSmoking, affectedBlockPositions,
- * explosionSize) воспроизведены как СВОИ private-поля (родитель их не хранит доступно — private final).
- */
+/** neo's Explosion became a pure interface, but the engine's event hooks require the concrete ServerExplosion
+ *  type, so this extends that class instead; every 1.7.10 field is reproduced since the parent keeps them private. */
 public class ExplosionGT extends ServerExplosion {
 	public static ExplosionGT explode(Level aWorld, Entity aEntity, double aX, double aY, double aZ, float aPower, boolean aFlaming, boolean aSmoking) {
 		ExplosionGT tExplosion = new ExplosionGT(aWorld, aEntity, aX, aY, aZ, aPower);
@@ -112,9 +103,8 @@ public class ExplosionGT extends ServerExplosion {
 	}
 
 	public ExplosionGT(Level aWorld, Entity aEntity, double aX, double aY, double aZ, float aPower) {
-		// F-explosion (neo-модель): взрывы в neo SERVER-AUTHORITATIVE (ServerExplosion создаётся server-side, синк клиенту пакетом
-		// ниже) — это правильная neo-архитектура, не 1.7.10 обе-стороны. Каст (ServerLevel)aWorld безопасен: все вызыватели GT6-взрывов
-		// server-side (Level.explode-путь). Не заглушка.
+		// neo explosions are server-authoritative by design, synced to the client by packet; the server-side cast
+		// is safe since every GT6 explosion caller is already server-side.
 		super((ServerLevel)aWorld, aEntity, null, null, new Vec3(aX, aY, aZ), aPower, F, Explosion.BlockInteraction.DESTROY);
 		mWorld = aWorld;
 		explosionX = aX; explosionY = aY; explosionZ = aZ;
@@ -123,7 +113,7 @@ public class ExplosionGT extends ServerExplosion {
 		isSmoking = true;
 	}
 
-	// protected (было private): подклассы GT6 (DynamiteExplosion в MultiTileEntityDynamite) переиспользуют центр — extends ExplosionGT + доступ к воспроизведённым 1.7.10-полям (§принцип-5, не дублировать).
+	// Made protected (was private) so GT6 subclasses like DynamiteExplosion can reuse this instead of duplicating it.
 	protected Level mWorld;
 	protected final double explosionX, explosionY, explosionZ;
 	protected final float explosionSize;
@@ -191,9 +181,8 @@ public class ExplosionGT extends ServerExplosion {
 	}
 
 	public void doExplosionB(boolean aEffects) {
-		// F-explosion (функционально через neo-модель): звук/частицы взрыва ДОСТАВЛЯЮТСЯ клиенту через ClientboundExplodePacket
-		// выше (несёт SoundEvents.GENERIC_EXPLODE + explosion-particles — neo сам рисует/звучит на клиенте). 1.7.10 ручной
-		// playSoundEffect(String)/spawnParticle(String) здесь редундантен (neo убрал строковый API; packet покрывает). Не заглушка.
+		// Explosion sound and particles now reach the client through the packet above, which the client renders
+		// itself; the old manual string-keyed sound/particle calls are redundant with it, not a stub.
 		if (isSmoking) {
 			@SuppressWarnings("rawtypes")
 			Iterator tIterator = affectedBlockPositions.iterator();
@@ -216,13 +205,12 @@ public class ExplosionGT extends ServerExplosion {
 					d3 *= d7;
 					d4 *= d7;
 					d5 *= d7;
-					// F-explosion: было mWorld.spawnParticle("explode"/"smoke") — per-block частицы покрыты ClientboundExplodePacket (см. заметку метода выше). Не заглушка.
+					// Per-block particles are already covered by the explosion packet noted on the method above; not a stub.
 				}
 				if (WD.getMaterial(tBlock) != Material.air) {
 					BlockState tState = gregapi.util.WD.state(mWorld, tPos);
-					// F-explosion (АДАПТИРОВАНО): дроп блоков от взрыва РЕАЛИЗОВАН через neo Block.dropResources (loot-table) с
-					// порогом chance=1/explosionSize (как 1.7.10 dropBlockAsItemWithChance). Caveat: neo loot-модель = роль-на-стек
-					// vs 1.7.10 роль-на-предмет — распределение при >1 дропе с блока не идентично (движок-форс). Функционально, не заглушка.
+					// Block drops from the explosion now go through the engine's loot-table path at the same chance the
+					// original used; the per-stack loot model does not distribute multi-item drops identically, an engine-forced difference.
 					if (tBlock.canDropFromExplosion(tState, mWorld, tPos, this) && mWorld.getRandom().nextFloat() < 1 / explosionSize) Block.dropResources(tState, mWorld, tPos, mWorld.getBlockEntity(tPos));
 					if (mWorld instanceof ServerLevel tServerLevel) tBlock.onBlockExploded(tState, tServerLevel, tPos, this);
 				}

@@ -29,17 +29,9 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.enchantment.Enchantment;
 
-/**
- * @author Gregorius Techneticies
- *
- * <p>Форс движка, см. {@link Enchantment_WerewolfDamage} (тот же класс изменения — record
- * {@code Enchantment}, невозможность {@code extends EnchantmentDamage}/override
- * {@code func_151367_b}). Игровая логика перенесена 1:1 в {@link EnchantmentEffect_Slime};
- * bootstrap — {@link EnchantsGT6#bootstrap}.
- *
- * F8 (1:1): материал→чара назначения (golden ctor addEnchantmentForDamage(this,N)) ПЕРЕНЕСЕНЫ в MT.init() enchant-блок
- * как addEnchantmentForDamage(KEY,N). Материалы снова несут Dissolving. Не заглушка.
- */
+/** @author Gregorius Techneticies
+ *  Engine-forced split, see {@link Enchantment_WerewolfDamage}; game logic moved 1:1 into
+ *  {@link EnchantmentEffect_Slime}. Material-to-enchantment assignments moved into MT.init() intact. */
 public class Enchantment_SlimeDamage {
 	public static final ResourceKey<Enchantment> KEY =
 		ResourceKey.create(Registries.ENCHANTMENT, Identifier.fromNamespaceAndPath(MD.GAPI.mID, "dissolving"));

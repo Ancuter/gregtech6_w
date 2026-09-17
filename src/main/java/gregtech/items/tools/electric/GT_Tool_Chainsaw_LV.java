@@ -97,7 +97,7 @@ public class GT_Tool_Chainsaw_LV extends GT_Tool_Axe {
 				ArrayList<ItemStack> tDrops = ((IShearable)aBlock).onSheared(aStack, aPlayer.level(), aX, aY, aZ, aFortune);
 				aDrops.clear();
 				aDrops.addAll(tDrops);
-				/*neo: BlockDropsEvent getDrops() падают всегда; dropChance убран*/;
+				/* neo: BlockDropsEvent getDrops() always falls; dropChance removed */;
 			}
 			WD.set(aPlayer.level(), aX, aY, aZ, NB, 0, 0);
 			return 0;
@@ -105,7 +105,7 @@ public class GT_Tool_Chainsaw_LV extends GT_Tool_Axe {
 		if ((WD.getMaterial(aBlock) == Material.ice || WD.getMaterial(aBlock) == Material.packedIce) && aDrops.isEmpty()) {
 			aDrops.add(ST.make(aBlock, 1, aMetaData));
 			WD.set(aPlayer.level(), aX, aY, aZ, NB, 0, 3);
-			/*neo: BlockDropsEvent getDrops() падают всегда; dropChance убран*/;
+			/* neo: BlockDropsEvent getDrops() always falls; dropChance removed */;
 			return 0;
 		}
 		return super.convertBlockDrops(aDrops, aStack, aPlayer, aBlock, aAvailableDurability, aX, aY, aZ, aMetaData, aFortune, aSilkTouch, aEvent);

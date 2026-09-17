@@ -40,12 +40,8 @@ import java.util.Random;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
 
-/** 1.7.10 {@code net.minecraft.util.WeightedRandomChestContent} — data-holder chest-лута.
- *  BUG-039: класс живёт в {@code net.minecraftforge.common}, а НЕ в оригинальном {@code net.minecraft.util} —
- *  пакетом {@code net.minecraft.*} в рантайме владеет модуль minecraft (JPMS split-package), поэтому build.gradle
- *  исключает {@code net/minecraft/**} из jar и стрипает его из dev-запусков → класс в оригинальном пакете
- *  физически не существует в рантайме (NoClassDefFoundError). Пакет net.minecraftforge никем не занят и уходит
- *  в jar (там же живёт {@link ChestGenHooks}). Тело 1:1; см. decisions/F-loot-chestgen-map.md. */
+/** Moved out of the original net.minecraft.* package because JPMS strips that package from the
+ *  runtime jar; net.minecraftforge is unclaimed and ships fine, so the class lives there instead, body unchanged. */
 public class WeightedRandomChestContent {
 	public ItemStack theItemId;
 	public int theMinimumChanceToGenerateItem;
@@ -59,13 +55,13 @@ public class WeightedRandomChestContent {
 		itemWeight = aWeight;
 	}
 
-	/** 1.7.10 Forge-хук: генерация стеков одного entry. Тело 1:1 ({@code ChestGenHooks.generateStacks}). */
+	/** Generates the stacks for one entry; the body is unchanged from 1.7.10. */
 	protected ItemStack[] generateChestContent(Random aRandom, Container aInventory) {
 		return ChestGenHooks.generateStacks(aRandom, theItemId, theMinimumChanceToGenerateItem, theMaximumChanceToGenerateItem);
 	}
 
-	/** 1.7.10 {@code WeightedRandomChestContent.generateChestContents} 1:1: aCount раз — взвешенный выбор entry,
-	 *  генерация его стеков, раскладка в случайные слоты инвентаря. */
+	/** Unchanged from 1.7.10: picks an entry by weight, generates its stacks, and places them into
+	 *  random inventory slots, repeated aCount times. */
 	public static void generateChestContents(Random aRandom, WeightedRandomChestContent[] aList, Container aInventory, int aCount) {
 		for (int j = 0; j < aCount; ++j) {
 			WeightedRandomChestContent tContent = getRandomItem(aRandom, aList);
@@ -77,8 +73,8 @@ public class WeightedRandomChestContent {
 		}
 	}
 
-	/** 1.7.10 {@code WeightedRandom.getRandomItem} 1:1 (рулетка по itemWeight; сам класс WeightedRandom в neo
-	 *  переработан несовместимо, потому формула воспроизведена здесь — единственном месте её использования). */
+	/** Reproduces 1.7.10's weighted-roulette selection here because neo reworked the WeightedRandom
+	 *  class incompatibly, and this is the only place that needs the original formula. */
 	public static WeightedRandomChestContent getRandomItem(Random aRandom, WeightedRandomChestContent[] aList) {
 		int tTotal = 0;
 		for (WeightedRandomChestContent tContent : aList) tTotal += tContent.itemWeight;

@@ -71,8 +71,8 @@ public class CR {
 	),
 	CLASSES_SPECIAL = new HashSetNoNulls<>(F
 	, AdvancedCraftingTool.class.getName()
-	// F11: классификация ЧУЖИХ ванильных спец-рецептов (skip при удалении) — строками с neo-именами.
-	// Дормантно до возврата скана чужих рецептов (ADR §7); MapCloning в neo отсутствует (слит).
+	// Classifies foreign vanilla special recipes to skip on removal, by neo class name; dormant until foreign-recipe
+	// scanning is implemented.
 	, "net.minecraft.world.item.crafting.FireworkRocketRecipe"
 	, "net.minecraft.world.item.crafting.DyeRecipe"
 	, "net.minecraft.world.item.crafting.BookCloningRecipe"
@@ -107,9 +107,8 @@ public class CR {
 	public static final ItemStackSet<ItemStackContainer> RECIPES_TO_DELATE = ST.hashset();
 	
 	public static boolean BUFFERING = T;
-	/** F11: собственный ПОСТОЯННЫЙ реестр крафт-рецептов GT6. Диспетчер-{@code CustomRecipe} читает его в
-	 *  рантайме; ванильная регистрация ({@code GameRegistry.addRecipe}) удалена — рецепты не кладутся в neo
-	 *  {@code RecipeManager} по-отдельности. См. {@code decisions/F11-crafting-recipe.md}. */
+	/** GT6's own persistent crafting-recipe registry, read at runtime by the {@code CustomRecipe} dispatcher instead of
+	 *  registering each recipe into neo's RecipeManager. */
 	public static final List<ICraftingRecipeGT> BUFFER = new ArrayListNoNulls<>(1000);
 
 	public static void stopBuffering() {
@@ -124,8 +123,8 @@ public class CR {
 			}
 		}
 		tList.removeAll(Arrays.asList((ICraftingRecipeGT)null));
-		// F11: BUFFER — постоянный реестр GT6, диспетчер читает его в рантайме → НЕ addRecipe и НЕ clear.
-		// DISABLE_GT6_CRAFTING_RECIPES теперь учитывает диспетчер/JEI-плагин (видимость), а не регистрация.
+		// BUFFER is a persistent registry read at runtime by the dispatcher, not a vanilla addRecipe/clear list; the disable
+		// flag now controls dispatcher visibility instead of registration.
 	}
 	
 	public static final String DELATE = "gt:delate";
@@ -315,11 +314,8 @@ public class CR {
 				aRecipe[i] = ((IItemContainer)aRecipe[i]).get(1);
 				if (aRecipe[i] == null) return F;
 			} else if (aRecipe[i] instanceof java.util.function.Supplier) {
-				// F12 boot-timing: call-site, бегущий на RegisterEvent (напр. конструктор ItemArmorBase),
-				// НЕ может строить ItemStack («Components not bound») — оригинальные ST.make(x,1,0) там
-				// выражаются ленивым Supplier и разворачиваются ЗДЕСЬ, в defer-окне server-start.
-				// Голый Item сюда не годится: ветка ниже канонично даёт W (любой износ), а оригинал
-				// universal-hazmat требует мету 0 — целую броню.
+				// A call site running on RegisterEvent can't build an ItemStack yet, so the original ST.make(x,1,0) calls
+				// are wrapped as a lazy Supplier and unwrapped here in the server-start defer window instead.
 				aRecipe[i] = ((java.util.function.Supplier<?>)aRecipe[i]).get();
 				if (!(aRecipe[i] instanceof ItemStack)) return F;
 			} else if (aRecipe[i] instanceof Enum) {
@@ -452,7 +448,7 @@ public class CR {
 		aResult = ST.update_(aResult);
 		
 		if (tThereWasARecipe || !aOnlyAddIfThereIsAnyRecipeOutputtingThis) {
-			// F11: в neo нет рантайм-регистрации рецептов — всё в ПОСТОЯННЫЙ буфер GT6 (диспетчер прочитает).
+			// neo has no runtime recipe registration, so this goes into GT6's persistent buffer for the dispatcher to read instead.
 			BUFFER.add(new AdvancedCraftingShaped(ST.copy_(aResult), aDismantleable, aRemovable, aKeepNBT, !aNotAutoCraftable, aEnchantmentsAdded, aEnchantmentLevelsAdded, aRecipe).setMirrored(aMirrored));
 		}
 		return T;
@@ -475,11 +471,8 @@ public class CR {
 				aRecipe[i] = ((IItemContainer)aRecipe[i]).get(1);
 				if (aRecipe[i] == null) return F;
 			} else if (aRecipe[i] instanceof java.util.function.Supplier) {
-				// F12 boot-timing: call-site, бегущий на RegisterEvent (напр. конструктор ItemArmorBase),
-				// НЕ может строить ItemStack («Components not bound») — оригинальные ST.make(x,1,0) там
-				// выражаются ленивым Supplier и разворачиваются ЗДЕСЬ, в defer-окне server-start.
-				// Голый Item сюда не годится: ветка ниже канонично даёт W (любой износ), а оригинал
-				// universal-hazmat требует мету 0 — целую броню.
+				// A call site running on RegisterEvent can't build an ItemStack yet, so the original ST.make(x,1,0) calls
+				// are wrapped as a lazy Supplier and unwrapped here in the server-start defer window instead.
 				aRecipe[i] = ((java.util.function.Supplier<?>)aRecipe[i]).get();
 				if (!(aRecipe[i] instanceof ItemStack)) return F;
 			} else if (aRecipe[i] instanceof Enum) {
@@ -524,7 +517,7 @@ public class CR {
 		
 		ST.update(aResult);
 		
-		// F11: в neo нет рантайм-регистрации рецептов — всё в ПОСТОЯННЫЙ буфер GT6 (диспетчер прочитает).
+		// neo has no runtime recipe registration, so this goes into GT6's persistent buffer for the dispatcher to read instead.
 		BUFFER.add(new AdvancedCraftingShapeless(ST.copy(aResult), aDismantleable, aRemovable, aKeepNBT, !aNotAutoCraftable, aEnchantmentsAdded, aEnchantmentLevelsAdded, aRecipe));
 		return T;
 	}
@@ -546,9 +539,8 @@ public class CR {
 		List<ICraftingRecipeGT> tList = list();
 		for (int i = 0; i < tList.size(); i++) if (tList.get(i).matches(aCrafting, aWorld)) return (sLastRecipe = tList.get(i)).getCraftingResult(aCrafting);
 
-		// F11: в 1.7.10 list() был ГЛОБАЛЬНЫМ CraftingManager-списком — стол GT6 крафтил и ВАНИЛЬНЫЕ рецепты.
-		// В neo они живут в датапак-RecipeManager (на mod-init пуст, поэтому не в BUFFER) — консультируем его
-		// здесь же, в едином центре подбора (тот же смысл «глобального списка», 1:1 поведение стола).
+		// 1.7.10's list() was the global CraftingManager, so GT6's table also crafted vanilla recipes; since vanilla
+		// now lives in the datapack RecipeManager instead of BUFFER, it's consulted here too, in the same central lookup.
 		if (aWorld instanceof net.minecraft.server.level.ServerLevel tSL) {
 			java.util.Optional<net.minecraft.world.item.crafting.RecipeHolder<net.minecraft.world.item.crafting.CraftingRecipe>> tVanilla =
 				tSL.getServer().getRecipeManager().getRecipeFor(net.minecraft.world.item.crafting.RecipeType.CRAFTING, aCrafting, tSL);
@@ -568,7 +560,7 @@ public class CR {
 		
 		if (tIndex == 2) {
 			assert tStack1 != null && tStack2 != null;
-			// F11: Item.isRepairable() (1.7.10, no-arg) удалён; neo-эквивалент — isCombineRepairable(ItemStack)
+			// 1.7.10's no-arg Item.isRepairable() is gone; the neo equivalent is isCombineRepairable(ItemStack).
 			// (neo-decompiled/.../item/Item.java:375-377).
 			if (tStack1.getItem() == tStack2.getItem() && tStack1.getItem().isCombineRepairable(tStack1)) {
 				int tNewDamage = ST.meta_(tStack1)+ST.meta_(tStack2)+(tStack1.getMaxDamage()/-20)-tStack1.getMaxDamage();
@@ -601,41 +593,30 @@ public class CR {
 		return rList;
 	}
 	
-	/** F11: строит neo {@code CraftingInput} 3×3 из массива стеков (пустые → {@code ItemStack.EMPTY}). */
+	/** Builds a neo 3x3 CraftingInput from a stack array, turning empty slots into ItemStack.EMPTY. */
 	public static CraftingInput crafting(ItemStack... aRecipe) {
 		List<ItemStack> tItems = new ArrayList<>(9);
 		for (int i = 0; i < 9; i++) tItems.add(i < aRecipe.length && aRecipe[i] != null ? aRecipe[i] : ItemStack.EMPTY);
 		return CraftingInput.of(3, 3, tItems);
 	}
 	
-	/** F11: собственный ПОСТОЯННЫЙ буфер крафт-рецептов GT6 (не neo {@code RecipeManager} — тот наполняется
-	 *  датапаком на старте сервера, на mod-init пуст). Диспетчер-{@code CustomRecipe} читает этот буфер. */
+	/** GT6's own persistent crafting buffer, since neo's RecipeManager only fills from the datapack at server start and is
+	 *  empty at mod-init; the dispatcher reads this instead. */
 	public static List<ICraftingRecipeGT> list() {return BUFFER;}
 
 	// ==========================================================================================================
-	// BUG-099: ПОЛНАЯ сетка крафта — то, что движок 26.1.2 отбрасывает до вызова рецепта.
-	//
-	// Часть крафта GT6 несёт смысл в САМОМ МЕСТЕ предмета: AdvancedCrafting1ToY различает варианты по числу
-	// пустых клеток перед предметом (провод 16→8/4/2, дроблёная руда→надтреснутый самоцвет, пыль→четвертинки).
-	// В 1.7.10 рецепту показывали InventoryCrafting целиком; в 26.1.2 сетка приходит подрезанной до габарита
-	// занятых клеток, и одиночный предмет всегда становится 1x1 — признак исчезает. Замер gt6gridprobe:
-	// недостижимо 27 вариантов из 119.
-	//
-	// Снимок кладёт ЕДИНСТВЕННАЯ вставка мода в движок (gregapi.mixin.MixinCraftingInput) — в том месте, где
-	// движок сам подрезает сетку и где полная ещё цела. Читает его рецепт при сопоставлении. Хранится по потоку
-	// (крафт исполняется в потоке своей стороны, клиентский и серверный не пересекаются) и отдаётся ТОЛЬКО той
-	// подрезанной сетке, из которой снимок и сделан — сверка по тождеству ссылки, чужой снимок не подставится.
-	// Снимка нет (вставка не применилась, вход собран не движком) → рецепт работает как прежде, по подрезанной.
+	// The engine crops the crafting grid to its occupied cells before the recipe sees it, erasing the empty-cell
+	// count some recipes decode meaning from; a mod injection snapshots the full grid right before cropping instead.
 	// ==========================================================================================================
 	private static final ThreadLocal<Object[]> FULL_GRID = new ThreadLocal<>();
 
-	/** Вызывается вставкой в движок: запомнить полную сетку, из которой получена подрезанная {@code aCropped}. */
+	/** Called by the engine injection to remember the full grid a cropped {@code aCropped} came from. */
 	public static void rememberFullGrid(net.minecraft.world.item.crafting.CraftingInput aCropped, int aWidth, int aHeight, List<ItemStack> aFullCells) {
 		if (aCropped == null || aFullCells == null) {FULL_GRID.remove(); return;}
 		FULL_GRID.set(new Object[] {aCropped, aFullCells});
 	}
 
-	/** Полная сетка для этой подрезанной, либо {@code null}: клетки в порядке 1.7.10 {@code getStackInSlot(i)}. */
+	/** Full grid for this cropped one, or null; cells are in 1.7.10's getStackInSlot(i) order. */
 	@SuppressWarnings("unchecked")
 	public static List<ItemStack> fullGrid(net.minecraft.world.item.crafting.CraftingInput aCropped) {
 		Object[] tSnapshot = FULL_GRID.get();
@@ -662,14 +643,14 @@ public class CR {
 	 */
 	public static boolean remout(ItemStack aOutput, boolean aIgnoreNBT, boolean aNotRemoveShapelessRecipes, boolean aOnlyRemoveNativeHandlers, boolean aDontRemoveDyeingRecipes) {
 		if (ST.invalid(aOutput)) return F;
-		DATAPACK_REMOVALS_OUT.add(ST.copy(aOutput)); // датапак-плечо: в 1.7.10 этот же вызов резал и ванильные рецепты
+		DATAPACK_REMOVALS_OUT.add(ST.copy(aOutput)); // datapack arm: in 1.7.10 this same call also cut vanilla recipes
 		boolean rReturn = F;
 		List<ICraftingRecipeGT> tList = list();
 		aOutput = OM.get_(aOutput);
 		for (int i = 0; i < tList.size(); i++) {
 			ICraftingRecipeGT tRecipe = tList.get(i);
 			if (tRecipe instanceof ICraftingRecipeGT && !((ICraftingRecipeGT)tRecipe).isRemovableByGT()) continue;
-			if (aNotRemoveShapelessRecipes && tRecipe instanceof ShapelessOreRecipe) continue; // F11: ветка чужого neo ShapelessRecipe отложена (буфер = только GT6-рецепты)
+			if (aNotRemoveShapelessRecipes && tRecipe instanceof ShapelessOreRecipe) continue; // Branch for a foreign neo ShapelessRecipe deferred (buffer holds only GT6 recipes).
 			if (aOnlyRemoveNativeHandlers) {
 				if (!CLASSES_NATIVE.contains(tRecipe.getClass().getName())) continue;
 			} else {
@@ -728,27 +709,19 @@ public class CR {
 	 */
 	public static void delate(ModData aMod, String aName, int aMetaData, int... aOtherMetaData) {Item aItem = ST.item(aMod, aName); if (aItem == null) return; delate(ST.make(aItem, 1, aMetaData)); for (int tMetaData : aOtherMetaData) delate(ST.make(aItem, 1, tMetaData));}
 	
-	/** BUG-091-хвост, класс «CR.remove не достаёт до датапака»: в 1.7.10 remove(...) удалял матчащийся рецепт
-	 *  из ЖИВОГО CraftingManager — включая ВАНИЛЬНЫЕ (например, бревно→4 доски, Loader_Recipes_Woods:182);
-	 *  в neo ваниль живёт в датапаке, а буфер GT6 её не содержит — датапак-плечо удаления терялось молча
-	 *  (симптом: при NERFED_WOOD бревно рукой давало ванильные 4 вместо GT-двух). Сетки всех remove-вызовов
-	 *  копятся здесь и на окне recipe-scan подавляют матчащиеся датапак-рецепты тем же центром
-	 *  {@code GT_API.removeDatapackRecipes}, что и Replace (дренаж — GT_API.onLevelLoadEarlyItemInit). */
+	/** 1.7.10's remove(...) deleted a matching recipe from the live CraftingManager, including vanilla ones; since
+	 *  vanilla lives in the datapack now and GT6's buffer never held it, so this collects grids to suppress datapack matches. */
 	public static final List<ItemStack[]> DATAPACK_REMOVALS = new ArrayListNoNulls<>();
 
-	/** Второе плечо того же класса, что {@link #DATAPACK_REMOVALS}, — удаление по ВЫХОДУ ({@link #delate}/{@link #remout}).
-	 *  В 1.7.10 обе функции резали живой {@code CraftingManager}, где ваниль и GT6 лежали вперемешку; в neo буфер GT6
-	 *  ванили не содержит, и плечо молча теряло ВСЕ 11 ванильных снятий {@code Loader_Recipes_Vanilla} (симптом игрока:
-	 *  печь крафтится без Firestarter, хотя оригинал даёт её только через {@code OD.craftingFirestarter},
-	 *  Loader_Recipes_Vanilla:55-57,63). Сеточное плечо это не покрывало: там суд — {@code matches(сетка)}, здесь — выход.
-	 *  Дренаж — тот же {@code GT_API.onLevelLoadEarlyItemInit}, тот же центр {@code GT_API.removeDatapackRecipes}. */
+	/** Second arm of the same class as {@link #DATAPACK_REMOVALS}, judging by output instead of grid; it silently
+	 *  lost all vanilla removals the same way once vanilla moved to the datapack, and drains through the same center. */
 	public static final List<ItemStack> DATAPACK_REMOVALS_OUT = new ArrayListNoNulls<>();
 
-	/** Третье плечо того же класса. Первые два судят сетку и выход, то есть умеют только верстак; чужой мод со
-	 *  своим станком держит рецепты СВОЕГО типа, и гасить их поштучно значит переписывать чужой датапак. */
+	/** Third arm of the same class: the first two only judge a workbench's grid or output, but a foreign machine's recipes
+	 *  need suppressing by their own type instead. */
 	public static final java.util.Set<String> DATAPACK_REMOVALS_TYPE = new gregapi.code.HashSetNoNulls<>();
 
-	/** Гасит станок чужого мода целиком: {@code remoutType(MD.MR, "soldering")} снимает все его рецепты. */
+	/** Kills a foreign mod's machine entirely; {@code remoutType(MD.MR, "soldering")} removes all of its recipes. */
 	public static boolean remoutType(ModData aMod, String... aTypes) {
 		if (aMod.mLoaded) for (String tType : aTypes) DATAPACK_REMOVALS_TYPE.add(aMod.mPrefix + tType);
 		return aMod.mLoaded;

@@ -1,26 +1,14 @@
-# Проверка на ЧИСТОЙ машине — то, чего локальная сборка дать не может: другая ОС, пустой кэш,
-# ничего, кроме содержимого репозитория.
-#
-# Два задания, идут параллельно:
-#   build  — артефакт + механические гейты (чистота jar, счётчики отложенности);
-#   server — выделенный сервер обязан подняться до «Done». Ловит класс, который не видит ни один
-#            юнит-тест: тесты поднимают сервер без мира и без клиентской стороны, а ломался за
-#            месяц именно дедикейт — трижды, и каждый раз это находила игра, а не проверки.
-#
-# Требование к раннеру: декомпиляция Minecraft идёт с -Xmx6G (gradle.properties), нужен раннер
-# с >= 16 ГБ RAM. Кэш Gradle делает декомпиляцию попаданием в кэш на последующих прогонах.
+# Runs on a clean machine with a fresh cache, which a local build cannot reproduce.
+# The dedicated-server job matters because unit tests never boot a world or the client side.
 name: CI
 
-# ЗАПУСКАЕТСЯ РУКАМИ, а не на каждый коммит: работа идёт заходами, сборка гоняется локально, и
-# автоматический прогон на push только дублировал бы её и слал шум. Здесь проверяется то, чего
-# локальная сборка дать не может, — чистая машина другой ОС.
-#   · кнопкой (Actions -> CI -> Run workflow), когда решено, что готово;
-#   · автоматически на pull request — чужие правки проверяются до того, как их вливают.
+# Triggered manually, not on every commit: the build already runs locally each session, so
+# an automatic run on push would just duplicate it; pull requests still trigger it automatically.
 on:
   workflow_dispatch:
   pull_request:
 
-# Повторный запуск на той же ветке отменяет предыдущий: сборка дорогая (декомпиляция MC).
+# Re-running on the same branch cancels the previous run: decompiling Minecraft is expensive.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -29,7 +17,7 @@ permissions:
   contents: read
 
 env:
-  # Тише лог и без демона: в одноразовом контейнере демон только жрёт память.
+  # Quieter log and no daemon: in a throwaway container a daemon only wastes memory.
   GRADLE_ARGS: --no-daemon --stacktrace
 
 jobs:
@@ -71,12 +59,11 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Задания «компиляция стендов» здесь больше нет: оснастка проверки живёт вне репозитория
-  # (../stands, подключается только под -Pgt6probes), а CI проверяет продукт. Стенды — не его область.
+  # The probe-build job is not here because the test harness lives outside this repository.
+  # CI only verifies the shipped product; the harness is a separate concern.
 
-  # Задания «тесты» здесь тоже больше нет: тесты — оснастка проверки, она живёт вне репозитория
-  # (../stands/product-tests) и в чекаут CI не попадает. CI проверяет то, что репозиторий содержит:
-  # собирается ли продукт, чист ли артефакт и поднимается ли выделенный сервер.
+  # Test execution is not here either: tests are harness code that lives outside this repository.
+  # The CI checkout never contains them; CI only checks that the product builds, is clean, and boots.
 
   server:
     name: Dedicated server boots
@@ -99,8 +86,8 @@ jobs:
           mkdir -p runserver
           echo "eula=true" > runserver/eula.txt
 
-      # Сервер сам не завершается: поднимаем в фоне и глушим сразу, как только в логе появилось
-      # «Done (» — иначе задание молотило бы до таймаута.
+      # The server never exits on its own, so it is started in the background and killed as soon as
+      # the log prints "Done ("; otherwise the job would run until it times out.
       - name: Boot server and require "Done"
         run: |
           set -uo pipefail

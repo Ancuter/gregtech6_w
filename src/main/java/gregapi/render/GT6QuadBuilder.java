@@ -37,65 +37,37 @@ import net.minecraft.resources.Identifier;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.neoforge.client.model.pipeline.QuadBakingVertexConsumer;
 
-/**
- * F3-render (client): «захватывающий рендерер» — объект {@code aRenderer}, который передаётся в GT6-цепочку
- * {@code ITexture.renderXPos(aRenderer,...) -> ITexture.Util.renderSide(side, Identifier, RGBa, ..., aRenderer, ...)}.
- * Вместо immediate-mode отрисовки (1.7.10 Tessellator, удалён) он АККУМУЛИРУЕТ per-side full-cube {@link BakedQuad}
- * для декларативной модели {@link GT6BlockModel}. Так GT6 per-side texture-логика (какая иконка/цвет на сторону —
- * решает сам ITexture/тайл) переиспользуется 1:1; переписан только «нарисуй сейчас» → «дай мне quad».
- * Спрайты резолвятся из атласа блоков в рантайме (текстуры GT6 динамические: материал×префикс, нельзя пре-bake).
- * Мост в {@link ITexture.Util}: если {@code aRenderer instanceof GT6QuadBuilder} → {@code putFace(side, icon, RGBa)}.
- * См. decisions/F3-render.md §2 (AE2 QuartzGlassModel/CubeBuilder-паттерн).
- */
+/** Accumulates per-side BakedQuads for the declarative {@link GT6BlockModel} in place of 1.7.10's immediate-mode
+ *  Tessellator drawing, so GT6's existing per-side texture logic is reused 1:1 and only the drawing mechanism changes. */
 public final class GT6QuadBuilder {
 	private final QuadCollection.Builder mQuads = new QuadCollection.Builder();
 	private final List<BakedQuad> mAll = new ArrayList<>();
-	/** Текущие render-bounds {minX,minY,minZ,maxX,maxY,maxZ} (1.7.10 RenderBlocks.setRenderBoundsFromBlock, обновляется per-pass). */
+	/** Current render bounds, updated per pass (1.7.10's RenderBlocks.setRenderBoundsFromBlock). */
 	private final float[] mBounds = {0, 0, 0, 1, 1, 1};
-	/** BUG-063 (граница отрисовки): суммарные bounds ФАКТИЧЕСКИ выданных граней — единственное место, где известно,
-	 *  сколько геометрии GT6 реально занимает. Считать статикой нельзя: у GT6 боксы вычисляются в рантайме
-	 *  (замер: из 785 объявлений box(...) числовых лишь 8 — тигель/турбина; трубы, коннекторы и каверы задают
-	 *  границы выражениями). Копится тут, читается {@link MultiTileEntityBER#getRenderBoundingBox}. */
+	/** Accumulates the bounds of actually-emitted faces, since GT6 boxes are computed at runtime rather than declared
+	 *  as constants; this is the only place that knows how much geometry a given MTE really occupies. */
 	private final float[] mDrawn = {0, 0, 0, 1, 1, 1};
 	private boolean mDrawnAny = false;
-	/** F3-render PILLAR: 1.7.10 RenderBlocks.uvRotate{Bottom,Top,East,West,North,South} → per-face поворот UV;
-	 *  индекс = Direction.get3DDataValue (DOWN,UP,NORTH,SOUTH,WEST,EAST). Реализован вариант 1 — единственный,
-	 *  который ставит vanilla renderBlockLog (RenderBlocks:4435-4446, PILLAR-блоки GT6: брёвна/балки/тюки). */
+	/** Per-face UV rotation matching 1.7.10's uvRotate{Bottom,Top,...} fields; only variant 1 is implemented,
+	 *  since that's the only one vanilla's renderBlockLog (PILLAR blocks) actually uses. */
 	private final byte[] mUVRotate = new byte[6];
 
-	/** Выставить повороты UV per-face (порядок: DOWN,UP,NORTH,SOUTH,WEST,EAST; 0=нет, 1=вариант 1 renderBlockLog). */
+	/** Sets per-face UV rotation (order DOWN,UP,NORTH,SOUTH,WEST,EAST; 0=none, 1=variant 1 of renderBlockLog). */
 	public void setUVRotate(int aDown, int aUp, int aNorth, int aSouth, int aWest, int aEast) {
 		mUVRotate[0] = (byte)aDown; mUVRotate[1] = (byte)aUp; mUVRotate[2] = (byte)aNorth;
 		mUVRotate[3] = (byte)aSouth; mUVRotate[4] = (byte)aWest; mUVRotate[5] = (byte)aEast;
 	}
-	/** Сброс поворотов (1.7.10 renderBlockLog обнулял uvRotate* после renderStandardBlock). */
+	/** Resets rotations, matching 1.7.10's renderBlockLog clearing uvRotate* after renderStandardBlock. */
 	public void clearUVRotate() {java.util.Arrays.fill(mUVRotate, (byte)0);}
 
-	/** F3-render: обновить текущие render-bounds перед проходом (GT6BlockModel читает {@code BlockBase.getRenderBounds()} после setBlockBounds). */
+	/** Updates the current render bounds before a pass, since GT6BlockModel reads them right after setBlockBounds. */
 	public void setBounds(float[] aBounds) {
 		if (aBounds == null || aBounds.length < 6) {System.arraycopy(new float[]{0,0,0,1,1,1}, 0, mBounds, 0, 6);}
 		else System.arraycopy(aBounds, 0, mBounds, 0, 6);
 	}
 
-	/**
-	 * ГРАНЬ ЛЕЖИТ В ПЛОСКОСТИ ГРАНИЦЫ КЛЕТКИ — единственный признак, по которому решается, задаст ли движок
-	 * про эту грань вопрос соседу (шов стеклянных половинок).
-	 *
-	 * <p><b>Что было не так.</b> Признак брался у ВСЕЙ формы («это полный куб?»), а не у грани. Следствие:
-	 * у любой не-кубической формы ВСЕ грани уходили в ведро «всегда видима», движок про них соседа не
-	 * спрашивал — и правило GT6 «грань к соседу того же стекла не рисуется»
-	 * ({@code BlockGlassClear.shouldSideBeRendered}) на слэбах просто не исполнялось: между двумя
-	 * половинками стекла оставался шов, тогда как полные блоки сливались.
-	 *
-	 * <p><b>Почему признак именно такой.</b> В 1.7.10 вопрос соседу задавала ваниль
-	 * ({@code RenderBlocks.renderStandardBlock} → {@code Block.shouldSideBeRendered}), и её собственный
-	 * дефолт отвечал «рисовать, не спрашивая» ровно тогда, когда bounds до границы не доставали
-	 * ({@code Block.shouldSideBeRendered}: {@code side==0 && minY>0 → T} и т.д.). Тот же признак — плоскость
-	 * границы — ваниль neo использует, назначая граням модели {@code cullface}. Так что это не новое
-	 * правило, а то же самое, перенесённое на per-face уровень: движок сам сверит формы
-	 * ({@code BlockBehaviour.skipRendering}), и внутренняя грань (верх слэба) останется видимой, потому что
-	 * её плоскость границы не касается.
-	 */
+	/** A face gets asked about neighbor culling only if it lies exactly on the cell-boundary plane; using the whole
+	 *  shape's cube-ness instead left non-cubic shapes (slabs) with unwanted seams on their always-visible internal faces. */
 	private boolean atCellBoundary(Direction aDir) {
 		switch (aDir) {
 		case DOWN : return mBounds[1] <= 0;
@@ -107,7 +79,7 @@ public final class GT6QuadBuilder {
 		}
 	}
 
-	/** GT6 side-байт → neo Direction: SIDE_Y_NEG=0=DOWN, Y_POS=1=UP, Z_NEG=2=NORTH, Z_POS=3=SOUTH, X_NEG=4=WEST, X_POS=5=EAST. */
+	/** GT6 side-byte to neo Direction mapping: 0=DOWN, 1=UP, 2=NORTH, 3=SOUTH, 4=WEST, 5=EAST. */
 	public void putFace(byte aSide, Identifier aIcon, short[] aRGBa) {
 		if (aIcon == null || aSide < 0 || aSide > 5) return;
 		TextureAtlasSprite tSprite = sprite(aIcon);
@@ -115,12 +87,12 @@ public final class GT6QuadBuilder {
 		Direction tDir = Direction.from3DDataValue(aSide);
 		BakedQuad tQuad = boundedFace(tDir, tSprite, aRGBa);
 		if (tQuad == null) return;
-		// грань в плоскости границы клетки — cull-aware (движок спросит соседа, см. atCellBoundary);
-		// грань внутри клетки (верх слэба, бок спайка/провода) — всегда видима.
+		// A face on the cell-boundary plane is cull-aware (engine asks the neighbor); a face inside the cell
+		// (slab top, pipe side) is always visible.
 		if (atCellBoundary(tDir)) mQuads.addCulledFace(tDir, tQuad); else mQuads.addUnculledFace(tQuad);
 		mAll.add(tQuad);
-		// BUG-063: границы копим по РЕАЛЬНО выданной грани (а не по каждому объявленному боксу) — тогда рамка
-		// отсечения совпадает с тем, что видит игрок, и не раздувается проходами, у которых текстуры не нашлось.
+		// Bounds accumulate only from really-emitted faces, not every declared box, so the culling frame matches
+		// what's actually drawn, instead of being inflated by a pass with a missing texture.
 		if (mDrawnAny) {
 			for (int i = 0; i < 3; i++) if (mBounds[i] < mDrawn[i]) mDrawn[i] = mBounds[i];
 			for (int i = 3; i < 6; i++) if (mBounds[i] > mDrawn[i]) mDrawn[i] = mBounds[i];
@@ -130,8 +102,7 @@ public final class GT6QuadBuilder {
 		}
 	}
 
-	/** BUG-063: суммарные bounds выданных граней {minX,minY,minZ,maxX,maxY,maxZ} в локальных координатах блока,
-	 *  либо null, если не выдано ни одной грани. */
+	/** Sum of emitted-face bounds in local block coordinates, or null if no face was ever emitted. */
 	public float[] drawnBounds() {return mDrawnAny ? mDrawn : null;}
 
 	public QuadCollection build() {return mQuads.build();}
@@ -140,44 +111,32 @@ public final class GT6QuadBuilder {
 
 	private static TextureAtlasSprite sprite(Identifier aIcon) {return resolveSprite(aIcon);}
 
-	/** Резолв спрайта из block-атласа (по умолчанию — блок-грани через putFace/resolveBlockFaceIcon). */
+	/** Sprite resolve from the block atlas, the default used by putFace/resolveBlockFaceIcon for block faces. */
 	public static TextureAtlasSprite resolveSprite(Identifier aIcon) {return resolveSprite(aIcon, net.minecraft.data.AtlasIds.BLOCKS);}
 
-	/** Резолв спрайта из указанного атласа. GT6-текстуры динамические: блок-грани — в BLOCKS (atlases/blocks.json),
-	 *  item-иконки — в ITEMS (atlases/items.json, textures/items/**). GT6ItemModel резолвит из ITEMS (материал-предметы
-	 *  берут item-версию materialicons, а не блочную; gt.multiitem.* иначе не в атласе → пурпур). */
+	/** Resolves a sprite from a chosen atlas, since GT6 textures are dynamic: block faces live in BLOCKS
+	 *  while item icons (material items) live in ITEMS. */
 	public static TextureAtlasSprite resolveSprite(Identifier aIcon, Identifier aAtlas) {
 		try {
 			net.minecraft.client.renderer.texture.TextureAtlas tAtlas = Minecraft.getInstance().getAtlasManager().getAtlasOrThrow(aAtlas);
 			TextureAtlasSprite tSprite = tAtlas.getSprite(aIcon);
-			// getSprite возвращает MISSING-спрайт (не null) при отсутствии (TextureAtlas.java:255) → приводим к null: даёт
-			// работать fallback (ITEMS→BLOCKS в GT6ItemModel) и пропуск грани в putFace вместо пурпур-квада; детекция пурпура.
+			// getSprite returns the MISSING sprite, not null, on failure; converting it to null lets the ITEMS->BLOCKS
+			// fallback and face-skipping work, instead of drawing a purple quad.
 			return tSprite == tAtlas.missingSprite() ? null : tSprite;
 		} catch (Throwable e) {return null;}
 	}
 
-	/** F3 block-icon-data: neo-замена удалённого 1.7.10 {@code Block.getIcon(side,meta)} — {@link Identifier} спрайта
-	 *  грани ВАНИЛЬНОГО блока из его baked {@link net.minecraft.client.renderer.block.dispatch.BlockStateModel} (спрайт
-	 *  quad'а нужной стороны; particle-спрайт — fallback). Централизация §3: единственная точка «скопировать текстуру
-	 *  другого блока» — используют {@link IconContainerCopied} и {@link BlockTextureCopied}. meta 1.7.10 схлопнут в
-	 *  {@code defaultBlockState} (в neo вариантные под-блоки — отдельные Block'и, в вызывателях meta практически 0).
-	 *  aSide 0..5 = {@code Direction.from3DDataValue} (тот же маппинг, что {@link #putFace}); SIDE_ANY/вне диапазона → particle. */
+	/** Resolves a vanilla block's face sprite from its baked BlockStateModel, replacing the removed 1.7.10
+	 *  Block.getIcon(side,meta), as the sole centralized point for 'copy another block's texture'. */
 	public static Identifier resolveBlockFaceIcon(net.minecraft.world.level.block.Block aBlock, int aSide) {
 		return resolveBlockFaceIcon(aBlock, aSide, 0);
 	}
 
-	/** F3 block-icon-data (meta-aware): 1:1 к 1.7.10 {@code Block.getIcon(side,meta)}. Варианты 1.7.10 (stonebrick 0..3,
-	 *  dirt 0..2, sand 0..1) в neo — ОТДЕЛЬНЫЕ блоки (Flattening 1.13, таблица Mojang), не meta одного блока → сопоставляем
-	 *  (базовый-neo-блок,meta)→блок-вариант, иначе defaultBlockState базового. Централизация §3: единственная точка учёта meta
-	 *  для {@link BlockTextureCopied}/{@link IconContainerCopied} (их 1.7.10-предок звал getIcon с meta). */
+	/** meta-aware version, 1:1 with 1.7.10's Block.getIcon(side,meta): since Flattening 1.13 turned meta variants
+	 *  into separate neo blocks, it maps (base block, meta) to the variant block instead of reading a variant meta. */
 	public static Identifier resolveBlockFaceIcon(net.minecraft.world.level.block.Block aBlock, int aSide, int aMeta) {
-		// GT6-блок-цель (LIVE-DEFECTS №5): его модель — динамический GT6BlockModel, который БЕЗ level/pos квадов не отдаёт
-		// → baked-путь ниже падал в particle = system/error (жёлто-красный X у камешков на GT6-породах). Родной 1.7.10-канал
-		// Block.getIcon(side,meta) сохранён на BlockBase-иерархии (BlockBaseMeta/Log/Beam/Grass/...) — спрашиваем его напрямую;
-		// defensive-throw/null у классов без канала → штатный baked-путь ниже.
-		// Отбор по КОНТРАКТУ (gregapi.block.IBlock#getIcon), а не по иерархии: общего Block-предка у GT6 нет,
-		// а канал иконки есть у всех — BlockBase, обеих жидкостных иерархий и MTE. Носитель обязан ОТВЕЧАТЬ
-		// (null = «канала нет» → baked-путь ниже), поэтому глушилка catch(Throwable) здесь больше не нужна.
+		// A GT6 block's dynamic model gives no quads without level/pos, so the baked path below would fall to the
+		// error sprite; asking IBlock#getIcon directly first (by contract, not hierarchy) resolves the real icon instead.
 		if (aBlock instanceof gregapi.block.IBlock tGT6) {
 			Identifier tIcon = tGT6.getIcon(aSide, aMeta);
 			if (tIcon != null) return tIcon;
@@ -197,8 +156,8 @@ public final class GT6QuadBuilder {
 		return tSet.getParticleMaterial(tState).sprite().contents().name();
 	}
 
-	/** Flattening 1.13 (таблица Mojang): 1.7.10 meta-варианты ванильных блоков → отдельные neo-блоки. Возвращает
-	 *  блок-вариант для (базовый,meta) либо null (meta 0 / не мульти-блок → базовый). Только достоверные vanilla-таблицы. */
+	/** Flattening 1.13 lookup: returns the variant block for (base, meta), or null for meta 0 or a non-variant
+	 *  block, using only documented vanilla tables. */
 	private static net.minecraft.world.level.block.Block flattenVariant(net.minecraft.world.level.block.Block aBase, int aMeta) {
 		if (aMeta == 0) return null;
 		net.minecraft.world.level.block.Block B = aBase;
@@ -220,13 +179,13 @@ public final class GT6QuadBuilder {
 	// any other order rotates the shading map on the face while geometry, UV and winding stay correct.
 	static final int[] EMIT_ORDER = {1, 0, 3, 2};
 
-	/** Грань по текущим bounds (4 вершины) с UV из спрайта (клип по bounds) + tint из RGBa (0..255). AE2 QuartzGlassModel.createQuad/putVertex. */
+	/** Face from the current bounds with UV clipped to them and tint from RGBa, following AE2's QuartzGlassModel pattern. */
 	private BakedQuad boundedFace(Direction aDir, TextureAtlasSprite aSprite, short[] aRGBa) {
 		int r = aRGBa != null && aRGBa.length >= 3 ? (aRGBa[0] & 0xFF) : 255;
 		int g = aRGBa != null && aRGBa.length >= 3 ? (aRGBa[1] & 0xFF) : 255;
 		int b = aRGBa != null && aRGBa.length >= 3 ? (aRGBa[2] & 0xFF) : 255;
-		// 1.7.10 тинт грани шёл setColorOpaque_I (альфы у тинта НЕТ); GT6-цвета часто RGB-int с нулевой альфой →
-		// a=0 в neo делал грань ПРОЗРАЧНОЙ (машины «без текстур», виден только overlay). 0 → 255.
+		// 1.7.10's tint had no alpha channel, but GT6 colors are often RGB-int with a zero alpha byte, which neo reads
+		// as fully transparent; zero is remapped to 255 to match the original opaque tint.
 		int a = aRGBa != null && aRGBa.length >= 4 && (aRGBa[3] & 0xFF) != 0 ? (aRGBa[3] & 0xFF) : 255;
 		float[][] c = corners(aDir, mBounds);
 		if (mUVRotate[aDir.get3DDataValue()] == 1) rotateUV1(aDir, c, mBounds);
@@ -241,18 +200,15 @@ public final class GT6QuadBuilder {
 			tBuilder.addVertex(c[i][0], c[i][1], c[i][2]);
 			tBuilder.setColor(r, g, b, a);
 			tBuilder.setNormal((float)n.x, (float)n.y, (float)n.z);
-			// КРИТ (прозрачные/мусорные блоки): corners даёт u,v в 0..16 (block-texture конвенция), а neo getU/getV(offset)
-			// ждут offset 0..1 (u0+(u1-u0)*offset) → без /16 UV в 16× мимо спрайта = сэмпл вне текстуры (прозрачные щели
-			// атласа) → блок прозрачный. GT6ItemModel.flatFace уже делит на 16f — блочный путь этого не делал. Нормализуем.
+			// corners() gives UV in the 0..16 block-texture convention, but neo's getU/getV expect a 0..1 offset; without
+			// dividing by 16 the sample lands 16x outside the sprite, in the atlas's transparent gaps.
 			tBuilder.setUv(aSprite.getU(c[i][3] / 16f), aSprite.getV(c[i][4] / 16f));
 		}
 		return tBuilder.bakeQuad();
 	}
 
-	/** F3-fluid: quad жидкости с произвольными вершинами {x,y,z,u,v} (u,v в texel-единицах 0..16, как 1.7.10
-	 *  getInterpolatedU/V) — кванта-высоты/склоны поверхности. Всегда unculled (видимость решает
-	 *  {@link RendererBlockFluid} 1:1-логикой shouldSideBeRendered, а не neo-cull). aBothSides — вторая обратная
-	 *  намотка (1.7.10 рендерил без backface-cull и дублировал winding: поверхность видна из-под жидкости). */
+	/** Fluid quad with arbitrary vertices for sloped surfaces, always unculled since visibility is decided by
+	 *  RendererBlockFluid's own shouldSideBeRendered logic; aBothSides duplicates winding since 1.7.10 had no backface cull. */
 	public void fluidQuad(float[][] aCorners, Direction aDir, Identifier aIcon, short[] aRGBa, boolean aBothSides) {
 		if (aIcon == null || aCorners == null || aCorners.length < 4) return;
 		TextureAtlasSprite tSprite = sprite(aIcon);
@@ -264,30 +220,19 @@ public final class GT6QuadBuilder {
 			if (tBack != null) {mQuads.addUnculledFace(tBack); mAll.add(tBack);}
 		}
 	}
-	/** Порядок выдачи вершин произвольного quad'а, приводящий их к канону {@code FaceInfo.java:14-48}: таблицей
-	 *  {@link #EMIT_ORDER} его не выразить — вершины сюда приходят массивом от вызывателя (поверхность жидкости
-	 *  со склоном), поэтому канон вычисляется по самой геометрии.
-	 *
-	 *  <p>Форма канона у каждой грани — «два угла по первой плоскостной оси × два по второй» (ось нормали в
-	 *  каноне постоянна). Значит вершину достаточно классифицировать «меньший/больший» по обеим плоскостным осям
-	 *  и поставить на её место в каноне. По ведущей оси делим серединой разброса, по второй — ВНУТРИ пары с общей
-	 *  ведущей: так склон жидкости (разные высоты соседних углов) не путает «верх» с «низом».
-	 *
-	 *  <p>Обмотка сохраняется сама: канон противоположных граней у ванили противоположен по обходу, поэтому
-	 *  обратная сторона двусторонней поверхности получает обратную намотку тем же вызовом с {@code getOpposite}.
-	 *
-	 *  @return порядок выдачи 4 вершин; при вырожденной геометрии (совпавшие углы) — {@code {0,1,2,3}}, то есть
-	 *          порядок вызывателя без изменений (выдумывать перестановку не на чем). */
+	/** Computes the FaceInfo vertex canon from the geometry itself, since arbitrary sloped-surface vertices can't use
+	 *  the static EMIT_ORDER table; each vertex is classified low/high on the face's two planar axes and placed accordingly.
+	 *  @return the emission order; degenerate geometry (coincident corners) returns the caller's own order unchanged. */
 	static int[] canonicalOrder(Direction aDir, float[][] aCorners) {
 		final int tNormal = aDir.getAxis().ordinal();          // 0=X, 1=Y, 2=Z
-		final int a1 = tNormal == 0 ? 1 : 0;                   // первая плоскостная ось грани
-		final int a2 = tNormal == 2 ? 1 : 2;                   // вторая плоскостная ось грани
+		final int a1 = tNormal == 0 ? 1 : 0;                   // first planar axis of the face
+		final int a2 = tNormal == 2 ? 1 : 2;                   // second planar axis of the face
 		// A side face of a fluid must lead on its horizontal axis: the vertical one carries the slope,
 		// where "above the middle" tells nothing about which corner is which.
 		boolean[][] tCls = classify(aCorners, a1, a2);
 		boolean tSwapped = false;
 		if (tCls == null) {tCls = classify(aCorners, a2, a1); tSwapped = true;}
-		if (tCls == null) return new int[]{0, 1, 2, 3};        // вырожденная геометрия — порядок вызывателя
+		if (tCls == null) return new int[]{0, 1, 2, 3};        // degenerate geometry: caller's order
 		final boolean[] tHiLead = tCls[0], tHiRank = tCls[1];
 		final boolean[][] tCanon = canonPattern(aDir, tSwapped ? a2 : a1, tSwapped ? a1 : a2);
 		int[] rOrder = new int[4];
@@ -300,8 +245,8 @@ public final class GT6QuadBuilder {
 		return rOrder;
 	}
 
-	/** «Меньший/больший» по двум осям: ведущая — по середине разброса (обязана дать 2 на 2), вторая — ВНУТРИ
-	 *  пары с общим значением ведущей. Возврат {@code null} = ведущая ось вершины пополам не делит. */
+	/** Classifies vertices low/high on two axes: the lead axis splits at the spread midpoint, the second
+	 *  axis splits within each lead-axis pair; null means the lead axis can't split evenly. */
 	private static boolean[][] classify(float[][] aCorners, int aLead, int aRank) {
 		float tMin = Float.MAX_VALUE, tMax = -Float.MAX_VALUE;
 		for (float[] tV : aCorners) {tMin = Math.min(tMin, tV[aLead]); tMax = Math.max(tMax, tV[aLead]);}
@@ -317,19 +262,16 @@ public final class GT6QuadBuilder {
 			int p = -1, q = -1;
 			for (int i = 0; i < 4; i++) if (tHiLead[i] == tSide) {if (p < 0) p = i; else q = i;}
 			if (p < 0 || q < 0) return null;
-			if (Math.abs(aCorners[p][aRank] - aCorners[q][aRank]) < 1e-6F) return null; // пара не различима второй осью
+			if (Math.abs(aCorners[p][aRank] - aCorners[q][aRank]) < 1e-6F) return null; // pair indistinguishable on the second axis
 			tHiRank[aCorners[p][aRank] > aCorners[q][aRank] ? p : q] = true;
 		}
 		return new boolean[][]{tHiLead, tHiRank};
 	}
 
-	/** Канон {@code FaceInfo.java:14-48}, переписанный в «меньший/больший» по двум плоскостным осям грани.
-	 *  Дословные строки ванили (mn/mx по XYZ): DOWN (mn,mn,mx)(mn,mn,mn)(mx,mn,mn)(mx,mn,mx) · UP (mn,mx,mn)
-	 *  (mn,mx,mx)(mx,mx,mx)(mx,mx,mn) · NORTH (mx,mx,mn)(mx,mn,mn)(mn,mn,mn)(mn,mx,mn) · SOUTH (mn,mx,mx)
-	 *  (mn,mn,mx)(mx,mn,mx)(mx,mx,mx) · WEST (mn,mx,mn)(mn,mn,mn)(mn,mn,mx)(mn,mx,mx) · EAST (mx,mx,mx)
-	 *  (mx,mn,mx)(mx,mn,mn)(mx,mx,mn). Ось нормали в каждой строке постоянна и потому опущена. */
+	/** FaceInfo's vanilla vertex canon rewritten as low/high on each face's two planar axes; the normal
+	 *  axis is constant per direction and so omitted. */
 	private static boolean[][] canonPattern(Direction aDir, int a1, int a2) {
-		final boolean[][] rXYZ = new boolean[4][3];             // [вершина][ось] = «больший»
+		final boolean[][] rXYZ = new boolean[4][3];             // [vertex][axis] = 'high'
 		final boolean n = false, x = true;
 		switch (aDir) {
 		case DOWN:  set(rXYZ, n,n,x,  n,n,n,  x,n,n,  x,n,x); break;
@@ -347,7 +289,7 @@ public final class GT6QuadBuilder {
 		for (int i = 0; i < 12; i++) aTable[i / 3][i % 3] = aBits[i];
 	}
 
-	/** Один quad по 4 вершинам {x,y,z,u,v} (u,v 0..16) с tint; aReverse — признак задней стороны для вызывателя. */
+	/** One quad from 4 vertices with tint; aReverse tells the caller this is the back side. */
 	private BakedQuad vertexQuad(float[][] aCorners, TextureAtlasSprite aSprite, short[] aRGBa, Direction aDir, boolean aReverse) {
 		int r = aRGBa != null && aRGBa.length >= 3 ? (aRGBa[0] & 0xFF) : 255;
 		int g = aRGBa != null && aRGBa.length >= 3 ? (aRGBa[1] & 0xFF) : 255;
@@ -370,40 +312,38 @@ public final class GT6QuadBuilder {
 		return tBuilder.bakeQuad();
 	}
 
-	/** F3-render cross-модель (растения/цветы): X-форма из 2 диагональных плоскостей, каждая ДВУСТОРОННЯЯ (unculled,
-	 *  видна с обеих сторон). Текстура полная (UV 0..16 /16f, как vanilla block/cross). Используют IRenderedCross-блоки. */
+	/** Cross-model plants/flowers: an X-shape from two diagonal planes, each two-sided and unculled, with
+	 *  full UV, like vanilla's block/cross model. */
 	public void crossFace(Identifier aIcon, short[] aRGBa) {
 		if (aIcon == null) return;
 		TextureAtlasSprite tSprite = sprite(aIcon);
 		if (tSprite == null) return;
-		// cross-плоскости кладутся прямо в ведро «всегда видима» (addCrossPlane ниже) — вопрос соседу для них
-		// не задаётся вовсе, поэтому отдельного признака формы здесь не нужно.
-		addCrossPlane(new float[][]{{0,0,0},{1,0,1},{1,1,1},{0,1,0}}, tSprite, aRGBa); // диагональ SW->NE
-		addCrossPlane(new float[][]{{1,0,0},{0,0,1},{0,1,1},{1,1,0}}, tSprite, aRGBa); // диагональ SE->NW
+		// Cross planes go straight into the always-visible bucket, so they never need the boundary-plane cull check.
+		addCrossPlane(new float[][]{{0,0,0},{1,0,1},{1,1,1},{0,1,0}}, tSprite, aRGBa); // diagonal SW->NE
+		addCrossPlane(new float[][]{{1,0,0},{0,0,1},{0,1,1},{1,1,0}}, tSprite, aRGBa); // diagonal SE->NW
 	}
 	private void addCrossPlane(float[][] aCorners, TextureAtlasSprite aSprite, short[] aRGBa) {
-		for (boolean tReverse : new boolean[]{false, true}) { // front + back = плоскость видна с обеих сторон
+		for (boolean tReverse : new boolean[]{false, true}) { // front + back = plane visible from both sides
 			BakedQuad tQuad = planeQuad(aCorners, aSprite, aRGBa, tReverse);
 			if (tQuad != null) {mQuads.addUnculledFace(tQuad); mAll.add(tQuad);}
 		}
 	}
-	/** Один quad произвольной плоскости (4 вершины) с полной UV + tint. aReverse — обратная намотка (задняя сторона). */
+	/** One quad of an arbitrary plane with full UV and tint; aReverse gives it reverse winding for the back side. */
 	private BakedQuad planeQuad(float[][] aCorners, TextureAtlasSprite aSprite, short[] aRGBa, boolean aReverse) {
 		int r = aRGBa != null && aRGBa.length >= 3 ? (aRGBa[0] & 0xFF) : 255;
 		int g = aRGBa != null && aRGBa.length >= 3 ? (aRGBa[1] & 0xFF) : 255;
 		int b = aRGBa != null && aRGBa.length >= 3 ? (aRGBa[2] & 0xFF) : 255;
-		// 1.7.10 тинт грани шёл setColorOpaque_I (альфы у тинта НЕТ); GT6-цвета часто RGB-int с нулевой альфой →
-		// a=0 в neo делал грань ПРОЗРАЧНОЙ (машины «без текстур», виден только overlay). 0 → 255.
+		// 1.7.10's tint had no alpha channel, but GT6 colors are often RGB-int with a zero alpha byte, which neo reads
+		// as fully transparent; zero is remapped to 255 to match the original opaque tint.
 		int a = aRGBa != null && aRGBa.length >= 4 && (aRGBa[3] & 0xFF) != 0 ? (aRGBa[3] & 0xFF) : 255;
 		float[][] tUV = {{0,16},{16,16},{16,0},{0,0}}; // bottom-left, bottom-right, top-right, top-left
-		float nx = aCorners[1][2]-aCorners[0][2], nz = -(aCorners[1][0]-aCorners[0][0]); // нормаль плоскости в XZ (для освещения; cull отключён)
+		float nx = aCorners[1][2]-aCorners[0][2], nz = -(aCorners[1][0]-aCorners[0][0]); // plane normal in XZ (for lighting; cull is disabled)
 		float nlen = (float)Math.sqrt(nx*nx+nz*nz); if (nlen > 0) {nx/=nlen; nz/=nlen;}
 		if (aReverse) {nx = -nx; nz = -nz;}
 		QuadBakingVertexConsumer tBuilder = new QuadBakingVertexConsumer();
 		tBuilder.setSprite(new Material.Baked(aSprite, false));
 		tBuilder.setDirection(Direction.UP);
-		// 1:1 vanilla block/cross-модель («затемнённые цветы», репорт игрока): "shade": false + "ambientocclusion": false —
-		// без направленного затенения по нормали (XZ-нормаль давала ×0.6-0.8) и без AO; 1.7.10 рисовал cross ровным светом.
+		// 1:1 with vanilla's block/cross model: shade and AO are off, since 1.7.10 drew plants under flat, undirected light.
 		tBuilder.setShade(false);
 		tBuilder.setAmbientOcclusion(false);
 		int[] tOrder = aReverse ? new int[]{3,2,1,0} : new int[]{0,1,2,3};
@@ -417,10 +357,8 @@ public final class GT6QuadBuilder {
 		return tBuilder.bakeQuad();
 	}
 
-	/** F3-render PILLAR: вариант 1 поворота UV — ДОСЛОВНО из 1.7.10 RenderBlocks (ветки uvRotate*==1 в
-	 *  renderFaceYNeg:7254/YPos:7349/ZNeg:7485/ZPos:7588/XNeg:7704/XPos:7840, включая свопы d7..d10),
-	 *  сведено в per-vertex UV-таблицы для порядка вершин {@link #corners}. Соответствие полей 1.7.10 → грань:
-	 *  uvRotateBottom→DOWN, Top→UP, East→ZNeg(NORTH), West→ZPos(SOUTH), North→XNeg(WEST), South→XPos(EAST). */
+	/** UV-rotation variant 1, verbatim from 1.7.10's RenderBlocks, reduced to per-vertex UV tables; note the field
+	 *  names map to faces non-trivially (uvRotateEast->NORTH, West->SOUTH, North->WEST, South->EAST). */
 	private static void rotateUV1(Direction aDir, float[][] c, float[] b) {
 		float u0x = b[0]*16, u1x = b[3]*16, u0z = b[2]*16, u1z = b[5]*16;
 		float v0y = (1-b[1])*16, v1y = (1-b[4])*16, ty0 = b[1]*16, ty1 = b[4]*16;
@@ -436,19 +374,11 @@ public final class GT6QuadBuilder {
 	}
 	private static void uv(float[][] c, int i, float u, float v) {c[i][3] = u; c[i][4] = v;}
 
-	/** 4 угла грани по bounds b={minX,minY,minZ,maxX,maxY,maxZ}, CCW относительно нормали; {x,y,z,u,v} (u,v в 0..16 → UV клипается по bounds).
-	 *  При full-cube (0..1) сводится к прежнему поведению (u,v = 0..16). */
+	/** 4 corners of a face from the block bounds, UV clipped to them; a full 0..1 cube reduces to the old fixed UV. */
 	private static float[][] corners(Direction aDir, float[] b) {
 		float x0 = b[0], y0 = b[1], z0 = b[2], x1 = b[3], y1 = b[4], z1 = b[5];
-		// ГРАНИЦЫ ВНЕ КУБА → UV ПОЛНЫЕ, а не интерполированные. 1.7.10 делает это в КАЖДОЙ из шести renderFaceXXX
-		// (RenderBlocks:7224-7234 YNeg, :7332 YPos, :7440 ZNeg, :7571-7581 ZPos, :7687 XNeg, :7803 XPos) парой
-		// «if (renderMinA < 0 || renderMaxA > 1) {d = getMinU/V(); d' = getMaxU/V();}»: интерполяция за пределами
-		// 0..1 увела бы координату ЗА СПРАЙТ, и движок сэмплил бы соседей по атласу. GT6 опирается на это всерьёз —
-		// лопасти турбины рисуются боксом −0.999..1.999 (MultiTileEntityLargeTurbine:117-119), стенки тигля
-		// −0.999..3.0 (MultiTileEntityCrucible:648-653), луч лазера −0.99..1.99, ErrorRenderer −0.25..1.25.
-		// БЕЗ этой страховки было ровно то, что видел игрок (BUG-061): «турбина показывает кусок атласа вместо
-		// лопастей, дыры на тиглях». Геометрию НЕ трогаем — вершины остаются на фактических границах, полными
-		// становятся только UV, то есть подставляем 0..1 вместо фактических границ ТОЛЬКО в текстурные координаты.
+		// Bounds outside the 0..1 cube get full UV instead of interpolated, since interpolating past the cube would sample
+		// neighboring atlas sprites; GT6 relies on this for turbine blades, crucible walls and other out-of-cube geometry.
 		float tx0 = x0, tx1 = x1, ty0 = y0, ty1 = y1, tz0 = z0, tz1 = z1;
 		if (x0 < 0 || x1 > 1) {tx0 = 0; tx1 = 1;}
 		if (y0 < 0 || y1 > 1) {ty0 = 0; ty1 = 1;}

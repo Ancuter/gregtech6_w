@@ -92,7 +92,7 @@ public class RecipeMapPrinter extends RecipeMap {
 			if (OM.is_("gt:canvas", tPaper)) {
 				if (tData.contains(NBT_CANVAS_BLOCK) && (!(ItemNBT.get(tPaper) != null) || !ItemNBT.get(tPaper).contains(NBT_CANVAS_BLOCK))) {
 					rRecipe = new Recipe(F, F, F, ST.array(ST.amount(1, tPaper), ST.amount(0, tUSB)), ST.array(ST.amount(1, tPaper)), null, null, FL.array(FL.mul(DYE_FLUIDS_CHEMICAL[DYE_INDEX_Black], 1, 9, T), FL.mul(DYE_FLUIDS_CHEMICAL[DYE_INDEX_Cyan], 1, 9, T), FL.mul(DYE_FLUIDS_CHEMICAL[DYE_INDEX_Magenta], 1, 9, T), FL.mul(DYE_FLUIDS_CHEMICAL[DYE_INDEX_Yellow], 1, 9, T)), null, 64, 16, 0);
-					CompoundTag tNBT = ItemNBT.get(rRecipe.mOutputs[0]); // F8-NBT: ItemStack.getTagCompound() удалён (DataComponents) -> центр ItemNBT.get.
+					CompoundTag tNBT = ItemNBT.get(rRecipe.mOutputs[0]); // Bridges the removed ItemStack.getTagCompound() through the central ItemNBT helper.
 					if (tNBT == null) tNBT = UT.NBT.make();
 					ST.copyBlock(tData, tNBT, NBT_CANVAS_BLOCK);
 					tNBT.putInt(NBT_CANVAS_META, tData.getIntOr(NBT_CANVAS_META, 0));
@@ -128,7 +128,7 @@ public class RecipeMapPrinter extends RecipeMap {
 					return new Recipe(F, F, F, ST.array(ST.amount(1, tPaper), ST.amount(0, tUSB)), ST.array(IL.Paper_Blueprint_Used.getWithNameAndNBT(1, tCrafted==null?null:tCrafted.getDisplayName().getString(), UT.NBT.setBlueprintCrafting(UT.NBT.make(), tBlueprint))), null, null, FL.array(DYE_FLUIDS_CHEMICAL[DYE_INDEX_Blue]), null, 128, 16, 0);
 				}
 				if (UT.Code.stringValid(UT.NBT.getBookTitle(tData)) && UT.Code.stringValid(UT.NBT.getBookAuthor(tData))) {
-					ListTag tPages = tData.getListOrEmpty("pages"); // F8-NBT: getTagList(name,type) -> neo getListOrEmpty(name) (тип-фильтр снят движком; pages всегда строковые, 1:1).
+					ListTag tPages = tData.getListOrEmpty("pages"); // getTagList(name,type) -> neo getListOrEmpty(name); the type filter is gone, pages are always strings (1:1).
 					if (tPages == null || tPages.size() < 1) {
 						String aMapping = UT.NBT.getBookMapping(tData);
 						if (UT.Code.stringValid(aMapping)) {

@@ -51,7 +51,7 @@ public class Behavior_Arrow extends AbstractBehaviorDefault {
 	public static Behavior_Arrow DEFAULT_PLASTIC = new Behavior_Arrow(EntityArrow_Material.class, 1.50F, 6.0F);
 	
 	private final int mLevel;
-	private final net.minecraft.resources.ResourceKey<Enchantment> mEnchantment; // neo: энчант адресуется ResourceKey (UT.NBT.addEnchantment)
+	private final net.minecraft.resources.ResourceKey<Enchantment> mEnchantment; // neo addresses an enchantment by ResourceKey (UT.NBT.addEnchantment)
 	private final float mSpeedMultiplier, mPrecision;
 	private final Class<? extends EntityArrow_Material> mArrow;
 	
@@ -73,7 +73,7 @@ public class Behavior_Arrow extends AbstractBehaviorDefault {
 			Enchantments.applyBullshitA((LivingEntity)aEntity, aPlayer, aStack);
 			Enchantments.applyBullshitB(aPlayer, aEntity, aStack);
 			if (!UT.Entities.hasInfiniteItems(aPlayer)) aStack.setCount(aStack.getCount()-1);
-			if (aStack.getCount() <= 0) aPlayer.getInventory().setItem(aPlayer.getInventory().getSelectedSlot(), ST.nn(NI)); // F15-граница: GT6 null -> движок EMPTY
+			if (aStack.getCount() <= 0) aPlayer.getInventory().setItem(aPlayer.getInventory().getSelectedSlot(), ST.nn(NI)); // The engine/GT6 empty-stack boundary maps GT6 null to engine EMPTY.
 			return F;
 		}
 		return F;

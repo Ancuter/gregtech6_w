@@ -61,9 +61,8 @@ public class RecipeMapAutocrafting extends RecipeMap {
 		super(aRecipeList, aUnlocalizedName, aNameLocal, aNameNEI, aProgressBarDirection, aProgressBarAmount, aNEIGUIPath, aInputItemsCount, aOutputItemsCount, aMinimalInputItems, aInputFluidCount, aOutputFluidCount, aMinimalInputFluids, aMinimalInputs, aPower, aNEISpecialValuePre, aNEISpecialValueMultiplier, aNEISpecialValuePost, F, aShowVoltageAmperageInNEI, aNEIAllowed, aConfigAllowed, aNeedsOutputs, aCombinePower, aUseBucketSizeIn, aUseBucketSizeOut);
 	}
 	
-	// F11: тип элементов — свой крафт-контракт ICraftingRecipeGT (замена Forge IRecipe), НЕ gregapi.recipes.Recipe
-	// (машинный рецепт RecipeMap — другая система, F11 её не трогает) и НЕ neo net.minecraft...crafting.Recipe
-	// (импорт последнего конфликтовал по имени с gregapi.recipes.Recipe — убран, здесь не нужен).
+	// The element type here is GT6's own crafting contract (replacing Forge's IRecipe), not the machine-recipe
+	// class of the same short name and not neo's own Recipe type, which conflicted on import.
 	public static final List<ICraftingRecipeGT> ALLOWED_RECIPES = new ArrayListNoNulls<>();
 	public static final List<ICraftingRecipeGT> RECENT_RECIPES = new ArrayListNoNulls<>();
 
@@ -86,8 +85,7 @@ public class RecipeMapAutocrafting extends RecipeMap {
 			}
 		}
 
-		// F11: Forge InventoryCrafting(Container,w,h)+setInventorySlotContents(...) удалены; neo-эквивалент —
-		// иммутабельный CraftingInput.of(...), уже централизован в CR.crafting(ItemStack...) (CR.java:573-578).
+		// Forge's mutable crafting-inventory constructor is gone; CraftingInput.of is used via the central CR.crafting helper.
 		CraftingInput tCraftInv = CR.crafting(tBlueprint);
 
 		ICraftingRecipeGT tIRecipe = null;

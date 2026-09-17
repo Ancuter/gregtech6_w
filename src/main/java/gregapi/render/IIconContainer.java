@@ -26,21 +26,12 @@ package gregapi.render;
 import net.neoforged.api.distmarker.Dist;
 import net.minecraft.resources.Identifier;
 
-/**
- * @author Gregorius Techneticies
- *
- * F3 (держатель текстуры): 1.7.10 {@code IIcon}/{@code IIconRegister} (immediate-mode атлас-стежка) удалены
- * в 26.1.2 целиком. Фаза baked-рендера ПРОЙДЕНА — держателем стал {@link Identifier}, а резолв в
- * {@code TextureAtlasSprite} централизован в {@code GT6QuadBuilder.resolveSprite}; на этом канале работают
- * {@code GT6BlockModel}/{@code GT6ItemModel} (текстуры мультиблоков — BUG-061, item-модели — BUG-068, оба
- * приняты живым тестом игрока). Долгом это больше не является: интерфейс — и есть neo-поверхность,
- * одна на весь мод (141+ мест).
- */
+/** @author Gregorius Techneticies
+ *  1.7.10's IIcon/IIconRegister atlas-stitching API is gone entirely; the texture holder is now a plain Identifier,
+ *  resolved into a TextureAtlasSprite by the centralized GT6QuadBuilder.resolveSprite. */
 public interface IIconContainer {
-	/**
-	 * @return держатель ссылки на текстуру для этого Render Pass.
-	 * F3 superseded-render (GT6BlockModel/ItemModel пайплайн; старый getIcon/immediate-mode мёртв, 0 вызовов neo): было {@code IIcon getIcon(int)}.
-	 */
+	/** @return the texture reference for this render pass.
+	 *  Was {@code IIcon getIcon(int)} in 1.7.10; {@code IIcon} no longer exists. */
 	public Identifier getIcon(int aRenderPass);
 
 	/**
@@ -63,11 +54,7 @@ public interface IIconContainer {
 	 */
 	public Identifier getTextureFile();
 
-	/**
-	 * Registers the Icon of this IconContainer.
-	 * F3 superseded-render (GT6BlockModel/ItemModel пайплайн; старый getIcon/immediate-mode мёртв, 0 вызовов neo): было {@code registerIcons(IIconRegister)} (атлас-стежка
-	 * 1.7.10, тип удалён). Параметр — нейтральный держатель до реальной привязки к
-	 * {@code ModelBaker.materials()}/атласу; реализациям следует не-op'ить на сервере.
-	 */
+	/** Registers the icon of this IconContainer; was registerIcons(IIconRegister) in 1.7.10.
+	 *  The parameter is now a neutral holder until bound to the real atlas; implementations should no-op server-side. */
 	public void registerIcons(Object aIconRegister);
 }

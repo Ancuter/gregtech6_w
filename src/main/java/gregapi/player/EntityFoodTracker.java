@@ -42,31 +42,16 @@ import net.neoforged.neoforge.registries.NeoForgeRegistries;
 
 import static gregapi.data.CS.*;
 
-/**
- * @author Gregorius Techneticies
- *
- * F-attachment: 1.7.10 {@code IExtendedEntityProperties} (реализовывался этим же классом, "gt.props.food"
- * ключ через {@code Entity.registerExtendedProperties}/{@code getExtendedProperties}) удалён из движка
- * целиком. Neo-эквивалент — data attachment ({@code net.neoforged.neoforge.attachment.AttachmentType<T>},
- * verified {@code AttachmentType.java}/{@code IAttachmentHolder.java}/{@code IAttachmentSerializer.java}):
- * ЭТОТ класс — хранимые данные (носитель), НЕ дескриптор типа, поэтому {@code implements AttachmentType}
- * убран (AttachmentType — не интерфейс, а final-класс-дескриптор, см. AttachmentType.java:59); вместо
- * этого он РЕГИСТРИРУЕТСЯ как {@code AttachmentType<EntityFoodTracker>} через {@link #ATTACHMENTS}
- * (тот же паттерн, что {@code gregapi.fluid.FluidGT}/{@code gregapi.worldgen.GT6WorldgenFeature} —
- * {@code DeferredRegister.create(NeoForgeRegistries.Keys.X, MD.GAPI.mID)} + {@code .register(aModBus)}
- * из {@code GT_API}-конструктора).
- */
+/** The removed IExtendedEntityProperties system is replaced by neo's data-attachment API; this class is the
+ *  stored data itself, so it registers as an AttachmentType via the central DeferredRegister instead. */
 public class EntityFoodTracker {
 	public static ArrayListNoNulls<EntityFoodTracker> TICK_LIST = new ArrayListNoNulls<>();
 
 	public byte mAlcohol = 0, mCaffeine = 0, mDehydration = 0, mSugar = 0, mFat = 0, mRadiation = 0;
 	public final LivingEntity mEntity;
 
-	/** F-attachment: сериализатор NBT для трекера (см. saveNBTData/loadNBTData ниже). Контракт
-	 *  IAttachmentSerializer.write() уже пишет в ValueOutput, СКОПИРОВАННЫЙ под ключ этого attachment-типа
-	 *  (AttachmentHolder.serializeAttachments), поэтому обёртка "gt.props.food" из 1.7.10 больше не нужна —
-	 *  сам контракт её обеспечивает. write()==false = "не сериализовывать" (1:1 эквивалент 1.7.10
-	 *  aNBT.removeTag(...) при пустом наборе полей). */
+	/** The attachment contract already scopes the write to this type's own key, so the old manual wrapper tag
+	 *  is no longer needed; returning false means don't serialize, matching the original's empty-tag removal. */
 	private static final IAttachmentSerializer<EntityFoodTracker> SERIALIZER = new IAttachmentSerializer<EntityFoodTracker>() {
 		@Override
 		public EntityFoodTracker read(IAttachmentHolder aHolder, ValueInput aInput) {
@@ -80,30 +65,22 @@ public class EntityFoodTracker {
 		}
 	};
 
-	/** F-attachment: центральный DeferredRegister — ЕДИНСТВЕННОЕ место, где GT6 регистрирует Entity-
-	 *  attachment-типы в neo. {@code .register(aModBus)} зовётся из центрального @Mod-конструктора
-	 *  ({@code gregapi.GT_API#GT_API(IEventBus)}, тем же мод-басом, что FluidGT/GT6WorldgenFeature/…). */
+	/** Central DeferredRegister, the only place GT6 registers entity attachment types in neo. */
 	public static final DeferredRegister<AttachmentType<?>> ATTACHMENTS = DeferredRegister.create(NeoForgeRegistries.Keys.ATTACHMENT_TYPES, MD.GAPI.mID);
 
-	/** Дефолт-конструктор (для свежих сущностей, ни разу не сохранявшихся) И read()-конструктор (для
-	 *  загруженных с диска) — ОБА идут через {@code new EntityFoodTracker(LivingEntity)}, который сам
-	 *  регистрирует себя в {@link #TICK_LIST} (см. конструктор ниже) — не важно, каким из двух путей
-	 *  экземпляр создан, он всегда попадёт в тик-лист ровно один раз. */
+	/** Both the fresh-entity path and the loaded-from-disk path go through this same constructor, which
+	 *  registers itself in the tick list, so either path adds the instance exactly once. */
 	public static final DeferredHolder<AttachmentType<?>, AttachmentType<EntityFoodTracker>> TYPE = ATTACHMENTS.register("food_tracker",
 		() -> AttachmentType.<EntityFoodTracker>builder(aHolder -> new EntityFoodTracker((LivingEntity)aHolder)).serialize(SERIALIZER).build());
 
 	public EntityFoodTracker(LivingEntity aEntity) {
 		mEntity = aEntity;
-		// F-attachment: 1.7.10 ванильный фреймворк сам звал IExtendedEntityProperties.init(Entity,World)
-		// сразу после registerExtendedProperties; у neo AttachmentType нет эквивалентного авто-хука
-		// (defaultValueSupplier/IAttachmentSerializer только возвращают значение, ничего не зовут на нём) —
-		// зовём явно здесь, чтобы КАЖДЫЙ сконструированный трекер (свежий через getData() ИЛИ
-		// восстановленный из NBT через read()) попадал в TICK_LIST ровно один раз.
+		// neo's AttachmentType has no automatic post-construction hook like 1.7.10 had, so this is called
+		// explicitly to make sure every tracker instance reaches the tick list exactly once.
 		init(aEntity, aEntity.level());
 	}
 
-	/** F-attachment: см. IAttachmentSerializer.write() выше — false = не сериализовывать (1:1 эквивалент
-	 *  1.7.10 aNBT.removeTag("gt.props.food") при полностью нулевом наборе полей). */
+	/** See IAttachmentSerializer.write() above: false means do not serialize, matching the original's tag removal. */
 	public boolean saveNBTData(ValueOutput aNBT) {
 		boolean rAny = F;
 		if (mAlcohol     != 0) {aNBT.putByte("a", mAlcohol    ); rAny = T;}
@@ -135,15 +112,8 @@ public class EntityFoodTracker {
 	public static void tick() {
 		if (SERVER_TIME % 50 == 0) for (int i = 0; i < TICK_LIST.size(); i++) {
 			EntityFoodTracker tTracker = TICK_LIST.get(i);
-			// F-attachment: neo attachment-карта ЗАМЕНЯЕТ значение целиком (не мутирует на месте) при
-			// десериализации из NBT (AttachmentHolder.deserializeAttachments -> raw Map.put), которая
-			// идёт ПОСЛЕ конструирования сущности (Entity.load(...) вызывается отдельно от конструктора,
-			// см. Entity.java:2090 vs Entity.java:327 EntityConstructing) — значит экземпляр, созданный
-			// через add()/getData() в момент конструирования, может быть замещён в карте более новым
-			// (восстановленным из диска) экземпляром ДО того, как этот успеет потикать. Без этой проверки
-			// осиротевший (замещённый) экземпляр продолжал бы тикать со старыми (нулевыми) значениями,
-			// а реальный (текущий) экземпляр — никогда. Самоочистка ниже — тот же приём, что уже был для
-			// isRemoved() (не новая ветка управления, расширение существующей проверки).
+			// Attachment deserialization replaces the whole stored value after construction, so a fresh instance can
+			// be replaced by a disk-loaded one before it ticks; without this check the orphaned instance keeps ticking stale.
 			if (tTracker.mEntity.isRemoved() || get(tTracker.mEntity) != tTracker) {TICK_LIST.remove(i--); continue;}
 
 			if (tTracker.mAlcohol >= 100) {
@@ -262,23 +232,15 @@ public class EntityFoodTracker {
 
 	public static void add(LivingEntity aEntity) {
 		if (aEntity == null || aEntity.level().isClientSide()) return;
-		// F-attachment: было registerExtendedProperties("gt.props.food", new EntityFoodTracker(aEntity))
-		// (1.7.10, безусловно НОВЫЙ объект) -> neo IAttachmentHolder.getData(AttachmentType<T>) (Entity
-		// extends AttachmentHolder implements IAttachmentHolder, AttachmentHolder.java:74) — на СВЕЖЕЙ
-		// (только что сконструированной) сущности карта аттачментов пуста, поэтому getData() тоже
-		// безусловно уходит в defaultValueSupplier и строит новый EntityFoodTracker (см. TYPE выше);
-		// getExistingDataOrNull() НЕ используется здесь намеренно (это create-точка, не read-точка).
+		// On a freshly constructed entity the attachment map is empty, so getData() always falls through to the
+		// default supplier and builds a new tracker; this is a create point, not a read point, on purpose.
 		aEntity.getData(TYPE.get());
 	}
 
 	public static EntityFoodTracker get(Entity aEntity) {
 		if (aEntity == null || aEntity.level().isClientSide()) return null;
-		// было getExtendedProperties(String) (1.7.10, возвращал Object, требовал instanceof-проверку) ->
-		// neo IAttachmentHolder.getExistingDataOrNull(AttachmentType<T>) (AttachmentHolder.java:87) — уже
-		// статически типизирован под EntityFoodTracker (по самому ключу TYPE), instanceof-проверка снята
-		// как ставшая невозможной (никакой другой тип под этим TYPE в принципе не хранится), и, что
-		// критично, НЕ создаёт запись при отсутствии (get-or-null, не get-or-create — та же семантика,
-		// что и раньше: null для сущностей, для которых add() не звался).
+		// Now statically typed to EntityFoodTracker by its own key, so the old instanceof check is gone; it returns
+		// null rather than creating an entry, the same semantics as before for entities that never called add().
 		return aEntity.getExistingDataOrNull(TYPE.get());
 	}
 }

@@ -29,15 +29,9 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.resources.Identifier;
 
-/**
- * @author Gregorius Techneticies
- *
- * F3-render: в 1.7.10 этот интерфейс дёргал по каждой стороне immediate-mode рендерер
- * (RenderBlocks/Tessellator/GL11/IIcon) — стек удалён в 26.1.2. РЕАЛИЗОВАНА замена (decisions/F3-render.md §8):
- * {@code aRenderer} = {@link GT6QuadBuilder}, per-side {@code renderXPos/...} → {@code Util.renderSide} →
- * {@code putFace(side, Identifier, RGBa)} строит BakedQuad; сборка в {@link GT6BlockModel} (DynamicBlockStateModel).
- * {@code IIcon} → {@link Identifier}. immediate-mode AO/Tessellator заменён декларативным baked-путём.
- */
+/** @author Gregorius Techneticies
+ *  1.7.10 called an immediate-mode renderer per side; the replacement routes aRenderer=GT6QuadBuilder through
+ *  Util.renderSide into putFace, which builds a BakedQuad for the declarative {@link GT6BlockModel} instead. */
 public interface ITexture {
 	public void renderXPos(Object aRenderer, Block aBlock, int aX, int aY, int aZ, int aBrightness, boolean aChangedBlockBounds);
 	public void renderXNeg(Object aRenderer, Block aBlock, int aX, int aY, int aZ, int aBrightness, boolean aChangedBlockBounds);
@@ -48,27 +42,24 @@ public interface ITexture {
 
 	public boolean isValidTexture();
 
-	/**
-	 * F3-render: было Tessellator/GL11/RenderBlocks immediate-mode (per-side UV + AO, ~700 строк). РЕАЛИЗОВАНА замена —
-	 * per-side {@code renderX/Y/Z} строят BakedQuad через {@link GT6QuadBuilder} (мост в {@code aRenderer}); сборка в
-	 * {@link GT6BlockModel}. AO/яркость даёт neo baked-путь (лайтмап на рендере), поэтому alpha-blending setup/teardown не нужны.
-	 */
+	/** Replaces ~700 lines of Tessellator/GL11 immediate-mode per-side rendering with BakedQuad building via
+	 *  GT6QuadBuilder; neo's baked path already handles AO and brightness, so no manual blend setup is needed. */
 	public static class Util {
 		public static boolean OPTIFINE_LOADED = F, GT_ALPHA_BLENDING = F, MC_ALPHA_BLENDING = F, IS_RENDERING_ALPHA = F;
 
-		/** F3-render: было GL11 alpha-blending Setup; в baked-пути не нужно (neo сам управляет blend по RenderType). No-op. */
+		/** Was GL11 alpha-blending setup; unneeded in the baked path since neo manages blending via RenderType. No-op. */
 		public static void startRendering(Object aRenderer, Block aBlock, BlockGetter aWorld, int aX, int aY, int aZ) {
 			//
 		}
 
-		/** F3-render: было GL11 alpha-blending Teardown; в baked-пути не нужно. No-op. */
+		/** Was GL11 alpha-blending teardown; unneeded for the same reason. No-op. */
 		public static void endRendering(Object aRenderer, Block aBlock, BlockGetter aWorld, int aX, int aY, int aZ) {
 			//
 		}
 
 		//=============================================================================================================
-		// F3-render: prepare+do+applyAmbientOcclusion (было ~700 строк Tessellator/GL11 по стороне) — заменено
-		// декларативным baked-путём: per-side quad в GT6QuadBuilder, AO/яркость даёт neo на рендере.
+		// Replaces the old prepare+do+applyAmbientOcclusion Tessellator/GL11 sequence with a per-side quad
+		// built via GT6QuadBuilder; AO and brightness now come from neo at render time.
 		//=============================================================================================================
 
 		public static boolean renderSide(byte aSide, Identifier aIcon, short[] aRGBa, boolean aAllowAlpha, boolean aUseConstantBrightness, boolean aEnableAO, Object aRenderer, Block aBlock, int aX, int aY, int aZ, int aBrightness, boolean aChangedBlockBounds) {
@@ -84,8 +75,8 @@ public interface ITexture {
 			}
 		}
 
-		// F3-render: per-side мост immediate-mode → декларативный quad. aRenderer=GT6QuadBuilder аккумулирует full-cube грань
-		// из (side, Identifier, RGBa). Reused GT6 per-side texture-логика (BlockTextureDefault даёт icon+RGBa на сторону).
+		// Per-side bridge from immediate-mode to a declarative quad: aRenderer accumulates a full-cube face
+		// from (side, icon, tint), reusing GT6's existing per-side texture logic unchanged.
 		/** Side = 5 (X_POS/EAST). */
 		public static boolean renderXPos(Identifier aIcon, short[] aRGBa, boolean aAllowAlpha, boolean aUseConstantBrightness, boolean aEnableAO, Object aRenderer, Block aBlock, int aX, int aY, int aZ, int aBrightness, boolean aChangedBlockBounds) {
 			if (aRenderer instanceof GT6QuadBuilder tB) tB.putFace((byte)SIDE_X_POS, aIcon, aRGBa);

@@ -59,20 +59,10 @@ import java.util.*;
 import static gregapi.data.CS.*;
 import static gregapi.data.CS.FluidsGT.*;
 
-/**
- * @author Gregorius Techneticies
- *
- * Class containing most known Fluid Names and Fluid Utility.
- *
- * F5 центральный переходник (`decisions/F5-fluids.md`) — регистрация каждой жидкости и
- * chainable-мутация после регистрации живёт в {@link FluidGT} (см. его javadoc); ЭТОТ класс — оракул
- * данных (enum ~196 констант, НЕ тронуты) + утилиты 1:1 поверх реальных neo-типов
- * {@link Fluid}(vanilla, поведение)/{@link FluidStack}(neo, immutable data). Из Forge-1.7.10-only машинерии:
- * контейнер-сторона (`FluidContainerRegistry` авто-реестр бакетов/канистр, запрос/fill/getEmpty) — уже
- * ВОССОЗДАНА поверх neo (см. getFluid/contains/getEmpty/fill + реестры FULL_TO_DATA/EMPTY_TO_FLUID_TO_DATA);
- * глобальный числовой id жидкости (`FluidRegistry`) — IMPOSSIBLE-1:1 (neo Registry без плотного id, см. id()).
- * REMAP-RULES §A: данные не трогать; остаток — в комментариях ниже по файлу.
- */
+/** @author Gregorius Techneticies
+ *  Class containing most known Fluid Names and Fluid Utility.
+ *  Data oracle (the enum itself is untouched) plus 1:1 utilities over the real neo Fluid/FluidStack types;
+ *  the Forge-only FluidContainerRegistry bucket/canister bookkeeping is rebuilt here on top of neo. */
 @SuppressWarnings("unchecked")
 public enum FL {
 	  Error                     ("error"                                                    , HIDDEN)
@@ -621,9 +611,8 @@ public enum FL {
 
 
 
-	/** F5 (функционально): id() возвращает реальный registry-int (BuiltInRegistries.FLUID.getId, стабилен после регистрации).
-	 *  1.7.10 глобальный fluid-id → neo registry-position: нумерация иная, но НЕСЕМАНТИЧНА (как fluidId в дампе, исключён из
-	 *  паритета). Потребители числового id (мета ItemFluidDisplay) → компоненты (F1/F8). Не заглушка. */
+	/** Returns the real registry position (stable once registered); the numbering itself is not semantically
+	 *  meaningful, unlike the old global fluid id. */
 	public int id() {Fluid tFluid = fluid(); return tFluid == null ? -1 : BuiltInRegistries.FLUID.getId(tFluid);}
 	public Fluid fluid() {return fluid_(mName);}
 	public boolean exists() {return fluid() != null;}
@@ -667,8 +656,7 @@ public enum FL {
 	public static String regName (Fluid aFluid) {return aFluid == null ? null : regName_(aFluid);}
 	public static String regName_(Fluid aFluid) {return FluidGT.nameOf(aFluid);}
 
-	/** F5 (функционально): реальный Registry.getId(Fluid) (стабилен после регистрации, безопасно в рантайме как оригинал);
-	 *  нумерация — registry-position (несемантична, как fluidId в дампе). Не заглушка. */
+	/** The numbering here is just a registry position, not semantically meaningful, same as the old fluidId dump field. */
 	public static short id (IFluidTank aTank) {return aTank == null ? -1 : id_(aTank);}
 	public static short id_(IFluidTank aTank) {return id(aTank.getFluid());}
 	public static short id (FluidStack aFluid) {return aFluid == null ? -1 : id_(aFluid);}
@@ -676,27 +664,12 @@ public enum FL {
 	public static short id (Fluid aFluid) {return aFluid == null ? -1 : id_(aFluid);}
 	public static short id_(Fluid aFluid) {return (short)BuiltInRegistries.FLUID.getId(aFluid);}
 
-	/** F5 (функционально): обратный поиск fluid по int-id через neo BuiltInRegistries.FLUID.get(byId) — работает. GT6 1.7.10
-	 *  полагался на плотную нумерацию от старта; registry-position несемантична (как fluidId в дампе). Не заглушка. */
+	/** Reverse lookup by int id through the real neo registry; GT6 1.7.10 relied on dense numbering from
+	 *  startup, but a registry position is not semantically meaningful either way. */
 	public static Fluid fluid (int aID) {return aID < 0 ? null : BuiltInRegistries.FLUID.get(aID).<Fluid>map(Holder::value).orElse(null);}
 	public static Fluid fluid (String aFluidName) {return Code.stringInvalid(aFluidName) ? null : fluid_(aFluidName);}
-	/** Заменяет 1.7.10 {@code FluidRegistry.getFluid(String)}, которое было {@code fluids.get(fluidName)}
-	 *  по карте, ключёванной {@code fluid.getName()} — т.е. поиском по "голому" имени БЕЗ namespace
-	 *  (recompSrc {@code net.minecraftforge.fluids.FluidRegistry:187-190,144}; там же под голыми именами
-	 *  "water"/"lava" лежали и ванильные жидкости). Save-путь {@link #save_} пишет в NBT-ключ
-	 *  {@code FluidName} именно голое имя ({@link FluidGT#nameOf} → для своих жидкостей {@code mName},
-	 *  для ванильных {@code Identifier.getPath()}) — значит load ОБЯЗАН находить голое имя, иначе
-	 *  жидкость теряется при save/load round-trip. Приоритет: (1) свои жидкости — точное GT6-имя через
-	 *  {@link FluidGT#BY_NAME}; (2) реестр neo — голое имя дефолтится в {@code minecraft:<name>}
-	 *  ({@code Identifier.tryParse} → {@code withDefaultNamespace}, `Identifier.java:49,72`; для ванильных
-	 *  water/lava это восстанавливает round-trip), namespaced-имя (с ':') парсится как есть.
-	 *  {@code Identifier.tryParse} даёт {@code null} на невалидном имени (не бросает), а
-	 *  {@code getOptional} — {@code null}-семантику отсутствия (в отличие от {@code getValue}, который у
-	 *  {@code DefaultedMappedRegistry} на промахе вернул бы {@code Fluids.EMPTY},
-	 *  `DefaultedMappedRegistry.java:47-56`), 1:1 с прежним null-на-отсутствие.
-	 *  F5 functional-adapted (межмод по голому имени, 1:1 null-on-absence, decisions/F5-fluids.md §9): голое имя ЧУЖОГО мода с
-	 *  namespace != minecraft по голому пути не находится (neo не даёт этого без перебора всего реестра,
-	 *  что неоднозначно) — как и раньше, редкий межмодовый случай. */
+	/** Replaces 1.7.10's FluidRegistry.getFluid(String), which looked fluids up by bare name with no namespace;
+	 *  save writes that same bare name, so load resolves GT6 fluids first, else defaults to the minecraft namespace. */
 	public static Fluid fluid_(String aFluidName) {
 		if (Code.stringInvalid(aFluidName)) return null;
 		FluidGT tGT = FluidGT.BY_NAME.get(aFluidName.toLowerCase());
@@ -710,19 +683,15 @@ public enum FL {
 	}
 
 	public static boolean equal(FluidStack aFluid1, FluidStack aFluid2) {return equal(aFluid1, aFluid2, F);}
-	/** aIgnoreNBT=T -> сравнение только по Fluid ({@code FluidStack.isSameFluid}); aIgnoreNBT=F ->
-	 *  сравнение по Fluid + data-компонентам ({@code FluidStack.isSameFluidSameComponents}) — реальные
-	 *  neo-хелперы, замена старого сравнения по публичному полю {@code .tag} (которого в neo нет). */
+	/** aIgnoreNBT selects between comparing by Fluid alone or by Fluid plus data components, replacing the
+	 *  old comparison against a public .tag field that no longer exists. */
 	public static boolean equal(FluidStack aFluid1, FluidStack aFluid2, boolean aIgnoreNBT) {
 		if (aFluid1 == null || aFluid2 == null) return F;
 		return aIgnoreNBT ? FluidStack.isSameFluid(aFluid1, aFluid2) : FluidStack.isSameFluidSameComponents(aFluid1, aFluid2);
 	}
 
-	/** aFluid != Fluids.EMPTY — neo-сентинел «нет жидкости» (1:1 замена прежнего 1.7.10 null-на-отсутствие,
-	 *  {@code FluidStack.getFluid()} в neo НИКОГДА не возвращает null, при пустоте отдаёт {@code Fluids.EMPTY},
-	 *  `neoforge-decompiled/.../fluids/FluidStack.java:228-234`). Правится централизованно здесь ОДИН раз —
-	 *  сюда стекаются {@link #valid(FluidStack)}/{@link #invalid(FluidStack)}/{@link #nonzero(FluidStack)}/
-	 *  {@link #zero(FluidStack)} ниже. */
+	/** Fluids.EMPTY is neo's sentinel for "no fluid", replacing the old null-on-absence convention, since
+	 *  FluidStack.getFluid() in neo never returns null. */
 	public static boolean   valid(Fluid      aFluid) {return aFluid != null && aFluid != Fluids.EMPTY && !FL.Error.is(FluidGT.nameOf(aFluid));}
 	public static boolean invalid(Fluid      aFluid) {return aFluid == null || aFluid == Fluids.EMPTY ||  FL.Error.is(FluidGT.nameOf(aFluid));}
 	public static boolean   valid(FluidStack aFluid) {return aFluid != null &&   valid(aFluid.getFluid());}
@@ -736,14 +705,8 @@ public enum FL {
 	
 	public static boolean exists(String aFluidName) {return aFluidName != null && fluid_(aFluidName) != null;}
 	
-	// Дисплей-стек жидкости для GUI-слотов (1:1): мета = fluid-id, NBT f/a/h/s. Стек ТРАНЗИЕНТНЫЙ — пересоздаётся
-	// каждый серверный тик и исключён из сейва (canSave у машин), поэтому нестабильность registry-id между запусками
-	// безвредна; ItemFluidDisplay уже читает жидкость из меты (FL.fluid(ST.meta_)) — канал парный.
-	// BUG-030 (контракт-шов класса F15, но для жидкостей): 1.7.10 FluidStack с amount=0 легально НОСИЛ тип жидкости
-	// (идиома дисплея); neo FluidStack.typeHolder() при amount<=0 возвращает Fluids.EMPTY (FluidStack.java:233-235,
-	// isEmpty-нормализация) → make(aFluid,0) стирал тип → ВСЕ дисплеи перечисления схлопывались в один «empty»
-	// (meta=0, f=empty) и валили вкладку дублем. Носитель типа — amount=1; display-объём передаём явно 0 (NBT «a»
-	// не пишется, aAmount!=0-гейт ниже) — выход побайтово тот же, что у 1.7.10 display(Fluid).
+	// Display stack for a fluid in GUI slots: transient and excluded from save, so registry-id instability
+	// between runs is harmless; amount 1 carries the type while the shown volume is passed as 0, as before.
 	public static ItemStack display(Fluid aFluid) {return aFluid == null ? null : display(make(aFluid, 1), 0, F, F, T);}
 	public static ItemStack display(FluidStack aFluid, boolean aUseStackSize, boolean aLimitStackSize) {return display(aFluid, aUseStackSize, aLimitStackSize, T);}
 	public static ItemStack display(FluidStack aFluid, boolean aUseStackSize, boolean aLimitStackSize, boolean aUseBucketSize) {return display(aFluid, aFluid == null ? 0 : aFluid.getAmount(), aUseStackSize, aLimitStackSize, aUseBucketSize);}
@@ -840,10 +803,8 @@ public enum FL {
 	public static boolean magic(FluidStack aFluid) {return aFluid != null && magic(aFluid.getFluid());}
 	public static boolean magic(Fluid aFluid) {return aFluid != null && FluidsGT.MAGIC.contains(FluidGT.nameOf(aFluid));}
 
-	/** "Газообразность" — GT6-собственный флаг ({@link FluidGT#isGaseous()}), НЕ часть свойств neo
-	 *  {@code FluidType} (там такого понятия в принципе нет, decisions/F5-fluids.md §2: GT6 владеет
-	 *  своими множествами независимо от движковых тегов). Для чужих (не GT6) жидкостей флаг недоступен —
-	 *  решает только принадлежность множеству {@code FluidsGT.GAS}. */
+	/** GT6's own flag, not part of neo FluidType (which has no such concept): GT6 tracks its own gaseous set
+	 *  independently of engine tags, so foreign fluids simply cannot answer this. */
 	public static boolean gas(IFluidTank aFluid, boolean aDefault) {return gas(aFluid.getFluid(), aDefault);}
 	public static boolean gas(IFluidTank aFluid) {return gas(aFluid.getFluid(), F);}
 	public static boolean gas(FluidStack aFluid, boolean aDefault) {
@@ -893,40 +854,27 @@ public enum FL {
 	}
 	
 	// ==========================================================================================================
-	// F5 §6.2 (decisions/F5-fluids.md) — ЧТО И СКОЛЬКО РЕАЛЬНО МОЖНО ИЗВЛЕЧЬ ИЗ КЛЕТКИ. Один ответ на весь мод.
-	//
-	// В 1.7.10 ответ выражал САМ ТИП БЛОКА: источник и поток были разными реестровыми блоками
-	// (Blocks.water / Blocks.flowing_water), а у жидкостей модов отвечал IFluidBlock от Forge-предка. Поэтому
-	// мод спрашивал вразнобой — сравнением блока, «meta == 0», либо IFluidBlock.drain(..., false).
-	// В neo источник и поток — ОДИН блок, разница живёт в FluidState.isSource(); дословный перенос сохранил
-	// форму вопроса и потерял смысл, а ответ расползся по вызывателям (BUG-115: насос осушал океан «в никуда»;
-	// BUG-116: молол натекающие потоки вхолостую). Приём переизобретён здесь, централизованно.
-	//
-	// Своей таблицы типов центр НЕ заводит — он спрашивает каналы самих носителей:
-	//   ванильная вода/лава     LEVEL == 0 -> 1000 mb, поток -> ПУСТО (объёма в потоке нет);
-	//   GT6 classic (река/океан/болото)  canDrain (мета 0) -> drain(...) = 1000 mb, поток -> ПУСТО;
-	//   GT6 finite (нефти/газ/геотермальная вода)  drain(...) = (мета+1) квант -> объём ЕСТЬ и у «потока»;
-	//   прочее -> ПУСТО.
+	// Single answer for the whole mod on what a cell can actually yield, since 1.7.10 spread this question
+	// across block-type comparisons; here each fluid answers from its own state instead.
 	// ==========================================================================================================
 
-	/** Извлекаемое содержимое клетки, БЕЗ изъятия (пробный вызов). {@code null} — брать нечего. */
+	/** A simulated peek at what a cell could yield without draining it; null means there is nothing to take. */
 	public static FluidStack drainable(net.minecraft.world.level.Level aWorld, net.minecraft.core.BlockPos aPos) {
 		if (aWorld == null || aPos == null) return null;
 		net.minecraft.world.level.block.state.BlockState tState = aWorld.getBlockState(aPos);
 		net.minecraft.world.level.block.Block tBlock = tState.getBlock();
-		// Река — исключение ПРОДУКТА, а не движка: блок несёт riverwater, но GT6 извлекает из него ЧИСТУЮ ВОДУ,
-		// причём одинаково у всех потребителей (1.7.10 MultiTileEntityPump.drainFluid:221-222 и CoverDrain:140-141
-		// — оба отдают FL.Water). Правило живёт здесь, иначе каждый потребитель снова заведёт свою ветку.
+		// A river tile carries riverwater but every consumer extracts plain water from it, so that substitution
+		// is centralized here instead of being repeated by each consumer.
 		if (tBlock == gregapi.data.CS.BlocksGT.River || gregapi.util.WD.waterstream(tBlock)) {
 			return gregapi.util.WD.meta(aWorld, aPos.getX(), aPos.getY(), aPos.getZ()) == 0 ? Water.make(1000) : null;
 		}
-		// GT6-жидкости отвечают своим каналом: classic сама гейтит по canDrain, finite отдаёт кванты по мете
+		// GT6 fluids answer through their own channel: classic gates on canDrain, finite reports quanta from its meta.
 		if (tBlock instanceof net.minecraftforge.fluids.IFluidBlock tFluidBlock) {
 			if (!tFluidBlock.canDrain(aWorld, aPos.getX(), aPos.getY(), aPos.getZ())) return null;
 			FluidStack rFluid = tFluidBlock.drain(aWorld, aPos.getX(), aPos.getY(), aPos.getZ(), F);
 			return rFluid == null || rFluid.getAmount() <= 0 ? null : rFluid;
 		}
-		// ванильные: объём несёт ТОЛЬКО источник (1.7.10 — отдельный блок Blocks.water/lava, ныне FluidState)
+		// Vanilla: only the source block ever carries volume (a separate block in 1.7.10, now FluidState.isSource()).
 		net.minecraft.world.level.material.FluidState tFluidState = tState.getFluidState();
 		if (tFluidState.isEmpty() || !tFluidState.isSource()) return null;
 		if (tFluidState.getType().isSame(Fluids.WATER)) return Water.make(1000);
@@ -934,20 +882,19 @@ public enum FL {
 		return null;
 	}
 
-	/** Есть ли в клетке извлекаемый объём. Для «пресечения» (снять клетку, из которой брать нечего). */
+	/** Whether the cell has anything extractable; used to prune a cell that has nothing left to give. */
 	public static boolean drainableEmpty(net.minecraft.world.level.Level aWorld, net.minecraft.core.BlockPos aPos) {
 		return drainable(aWorld, aPos) == null;
 	}
 
-	/** Изъять содержимое клетки НАСОВСЕМ: тот же ответ, что у {@link #drainable}, плюс снятие блока.
-	 *  Снятие идёт через центр записи мира ({@code WD.set}) — он же будит соседей, чтобы потоки не зависали
-	 *  (BUG-115, {@code LiquidBlock.updateShape} планирует пересчёт только при источнике рядом). */
+	/** Removing the block goes through the world-write center so neighboring flow gets woken up too, avoiding
+	 *  flows left stalled with no source nearby to trigger a recheck. */
 	public static FluidStack drainCell(net.minecraft.world.level.Level aWorld, net.minecraft.core.BlockPos aPos) {
 		FluidStack rFluid = drainable(aWorld, aPos);
 		if (rFluid == null) return null;
 		net.minecraft.world.level.block.Block tBlock = aWorld.getBlockState(aPos).getBlock();
 		if (tBlock instanceof net.minecraftforge.fluids.IFluidBlock tFluidBlock) {
-			// у GT6-жидкостей снятие — их собственный drain(..., true): finite ещё и пересчитывает соседей
+			// GT6 fluids remove themselves via their own drain(..., true); the finite variant also recalculates neighbors.
 			tFluidBlock.drain(aWorld, aPos.getX(), aPos.getY(), aPos.getZ(), T);
 		} else {
 			gregapi.util.WD.set(aWorld, aPos.getX(), aPos.getY(), aPos.getZ(), gregapi.data.CS.NB, 0, 2);
@@ -968,25 +915,18 @@ public enum FL {
 	public static FluidStack make_(String aFluidName, long aAmount, String aReplacementFluidName) {FluidStack rFluid = make(aFluidName, aAmount); return rFluid == null ? make_(aReplacementFluidName, aAmount) : rFluid;}
 	public static FluidStack make_(String aFluidName, long aAmount, String aReplacementFluidName, long aReplacementAmount) {FluidStack rFluid = make(aFluidName, aAmount); return rFluid == null ? make_(aReplacementFluidName, aReplacementAmount) : rFluid;}
 
-	/** Замена {@code new FluidStack(existingStack, newAmount)} (копирующий конструктор с новой
-	 *  ёмкостью 1.7.10) — у real neo {@link FluidStack} такого конструктора нет, вместо него
-	 *  {@link FluidStack#copyWithAmount(int)} (реальный метод, `FluidStack.java:255`). */
-	/** F-fluid-temperature ЦЕНТР: 1.7.10 {@code Fluid.setTemperature(int)} — GT6 задаёт температуру своих molten-жидкостей.
-	 *  neo {@code net.minecraft.world.level.material.Fluid} сеттера НЕ имеет; GT6-жидкость = {@link FluidGT} (свой
-	 *  {@code setTemperature}, FluidGT:176). Контент зовёт на статик-типе {@code Fluid} → централизуем instanceof-каст
-	 *  (no-op для vanilla-жидкости — безопасно; GT6 задаёт temperature только своим FluidGT). */
+	/** Replaces the 1.7.10 copying constructor FluidStack(existing, newAmount), which real neo FluidStack
+	 *  does not have; copyWithAmount(int) is the actual neo equivalent. */
+	/** neo's Fluid class has no temperature setter; a GT6 fluid is a {@link FluidGT} with its own setter, so
+	 *  this centralizes the instanceof cast (a no-op for vanilla fluids). */
 	public static void setTemperature(Fluid aFluid, long aTemperatureK) {FluidGT tGT = FluidGT.of(aFluid); if (tGT != null) tGT.setTemperature(aTemperatureK);}
 	public static FluidStack amount(FluidStack aFluid, long aAmount) {return aFluid == null ? null : aFluid.copyWithAmount(Code.bindInt(aAmount));}
 
 	public static FluidStack mul(FluidStack aFluid, long aMultiplier) {return aFluid == null ? null : amount(aFluid, (long)aFluid.getAmount() * aMultiplier);}
 	public static FluidStack mul(FluidStack aFluid, long aMultiplier, long aDivider, boolean aRoundUp) {return aFluid == null ? null : amount(aFluid, Code.units(aFluid.getAmount(), aDivider, aMultiplier, aRoundUp));}
 
-	// F5-transfer шов (decisions/F5-fluids.md §8): 1.7.10 side-aware IFluidHandler.fill(ForgeDirection,
-	// FluidStack,boolean) -> neo IFluidHandler.fill(FluidStack,FluidAction) SIDELESS. GT6-TE несут свой
-	// side-aware fill(Direction,FluidStack,boolean) (TileEntityBase01Root:663, делегат getFluidTankFillable
-	// (side)) — маршрутизируем side ТУДА (instanceof GT6-TE); ванильному neo-хендлеру side неприменим ->
-	// прямой sideless fill(fluid,action). FORGE_DIR[side]=neo Direction (CS:660). Восстанавливает 1:1
-	// overload-семью 1.7.10 (gregtech6/.../data/FL.java:823-834), un-stub DelegatorTileEntity-варианты.
+	// GT6 tile entities carry their own side-aware fill; routed there by instanceof, since a plain neo fluid
+	// handler has no concept of side and takes the sideless call directly.
 	private static long fillSided(IFluidHandler aFluidHandler, byte aSide, FluidStack aFluid, boolean aDoFill) {
 		return aFluidHandler instanceof gregapi.tileentity.base.TileEntityBase01Root tGT ? tGT.fill(FORGE_DIR[aSide], aFluid, aDoFill) : aFluidHandler.fill(aFluid, aDoFill ? FluidAction.EXECUTE : FluidAction.SIMULATE);
 	}
@@ -1004,10 +944,8 @@ public enum FL {
 	public static boolean fillAll (IFluidHandler aFluidHandler, byte[] aSides, FluidStack aFluid, boolean aDoFill) {return aFluidHandler != null && aFluid != null && fillAll_(aFluidHandler, aSides, aFluid, aDoFill);}
 	public static boolean fillAll_(IFluidHandler aFluidHandler, byte[] aSides, FluidStack aFluid, boolean aDoFill) {for (byte tSide : aSides) if (fillSided(aFluidHandler, tSide, aFluid, F) == aFluid.getAmount() && (!aDoFill || fillSided(aFluidHandler, tSide, aFluid, T) > 0)) return T; return F;}
 
-	// F5-capability: side-aware чтение танков из IFluidHandler. GT6-TE несут своё getTankInfo(Direction)
-	// (TileEntityBase01Root:731) — маршрутизируем ТУДА (instanceof, sided 1:1 c 1.7.10); ванильному neo-
-	// хендлеру side неприменим -> собираем FluidTankInfo[] из sideless neo-API getTanks/getFluidInTank/
-	// getTankCapacity (тот же приём, что fillSided:908). Заменяет 1.7.10 IFluidHandler.getTankInfo(ForgeDirection).
+	// Mirrors the fill-side routing: GT6 tile entities expose their own side-aware tank info, everything
+	// else is assembled from the sideless neo tank API.
 	public static gregapi.fluid.FluidTankInfo[] getTankInfo(IFluidHandler aFluidHandler, byte aSide) {
 		if (aFluidHandler == null) return ZL_FLUIDTANKINFO;
 		if (aFluidHandler instanceof gregapi.tileentity.base.TileEntityBase01Root tGT) return tGT.getTankInfo(FORGE_DIR[aSide]);
@@ -1017,11 +955,8 @@ public enum FL {
 		return rInfo;
 	}
 
-	// F5-capability canFill/canDrain (четвёртая пара ТОГО ЖЕ шва, что fillSided:923/drainSided:959/getTankInfo:944):
-	// 1.7.10 IFluidHandler.canFill(ForgeDirection,Fluid)/canDrain(...) в neo-API нет вовсе. GT6-TE несут свои
-	// side-aware canFill/canDrain (TileEntityBase01Root:780,786, делегаты getFluidTankFillable/Drainable(side)) —
-	// маршрутизируем side ТУДА (instanceof GT6-TE); ванильному neo-хендлеру side неприменим -> пробный
-	// SIMULATE-fill/drain на MAX (единственный sideless-эквивалент вопроса «примет ли/отдаст ли»).
+	// 1.7.10's side-aware canFill/canDrain has no neo equivalent at all; GT6 tile entities answer through
+	// their own side-aware methods, anything else gets a simulated fill/drain at max as the closest question.
 	public static boolean canFill(IFluidHandler aFluidHandler, byte aSide, Fluid aFluid) {
 		if (aFluidHandler == null || aFluid == null) return F;
 		if (aFluidHandler instanceof gregapi.tileentity.base.TileEntityBase01Root tGT) return tGT.canFill(FORGE_DIR[aSide], aFluid);
@@ -1036,21 +971,16 @@ public enum FL {
 	}
 	public static boolean canDrain (@SuppressWarnings("rawtypes") DelegatorTileEntity aDelegator, Fluid aFluid) {return aDelegator != null && aDelegator.mTileEntity instanceof IFluidHandler tHandler && canDrain(tHandler, aDelegator.mSideOfTileEntity, aFluid);}
 
-	// F5-transfer drain-сторона (зеркало fillSided:916 — тот же шов, вторая половина): 1.7.10 side-aware
-	// IFluidHandler.drain(ForgeDirection,...) -> neo sideless drain(...,FluidAction). GT6-TE несут свой side-aware
-	// drain (TileEntityBase01Root:758,767, делегат getFluidTankDrainable(side)) — маршрутизируем side ТУДА
-	// (instanceof GT6-TE); ванильному neo-хендлеру side неприменим -> прямой sideless drain. neo возвращает
-	// FluidStack.EMPTY вместо null (F15) — проверка amount<=0 в move_ покрывает оба. Восстанавливает 1:1
-	// move-семью 1.7.10 (gregtech6/.../data/FL.java:836-855): drain(simulate) -> fill(execute) -> drain(execute).
+	// Mirrors the fill-side routing for drain: GT6 tile entities keep their side-aware drain, everything else
+	// takes the sideless neo call; an EMPTY result is treated the same as the old null.
 	private static FluidStack drainSided(IFluidHandler aFluidHandler, byte aSide, int aMaxDrain, boolean aDoDrain) {
 		return aFluidHandler instanceof gregapi.tileentity.base.TileEntityBase01Root tGT ? tGT.drain(FORGE_DIR[aSide], aMaxDrain, aDoDrain) : aFluidHandler.drain(aMaxDrain, aDoDrain ? FluidAction.EXECUTE : FluidAction.SIMULATE);
 	}
 	private static FluidStack drainSided(IFluidHandler aFluidHandler, byte aSide, FluidStack aFluid, boolean aDoDrain) {
 		return aFluidHandler instanceof gregapi.tileentity.base.TileEntityBase01Root tGT ? tGT.drain(FORGE_DIR[aSide], aFluid, aDoDrain) : aFluidHandler.drain(aFluid, aDoDrain ? FluidAction.EXECUTE : FluidAction.SIMULATE);
 	}
-	// Публичный сторононесущий drain-канал (зеркало публичной fill-семьи:945). В 1.7.10 его не было: там прямой
-	// вызов aDelegator.mTileEntity.drain(getForgeSideOfTileEntity(),...) сам нёс сторону, в neo тот же вызов её
-	// теряет (SIDE_ANY). Ретрансляторы (Extender/Bridge/Filter/MiniPortal) обязаны ходить ЧЕРЕЗ этот центр.
+	// Public side-carrying drain entry point: the original direct call to the tile entity carried its side
+	// implicitly, but the neo equivalent drops it, so relays must go through this center to keep it.
 	public static FluidStack drain (@SuppressWarnings("rawtypes") DelegatorTileEntity aDelegator, FluidStack aFluid, boolean aDoDrain) {return aDelegator != null && aDelegator.mTileEntity instanceof IFluidHandler tHandler && aFluid != null ? drainSided(tHandler, aDelegator.mSideOfTileEntity, aFluid, aDoDrain) : null;}
 	public static FluidStack drain (@SuppressWarnings("rawtypes") DelegatorTileEntity aDelegator, int aMaxDrain, boolean aDoDrain) {return aDelegator != null && aDelegator.mTileEntity instanceof IFluidHandler tHandler ? drainSided(tHandler, aDelegator.mSideOfTileEntity, aMaxDrain, aDoDrain) : null;}
 	public static long move (@SuppressWarnings("rawtypes") DelegatorTileEntity aFrom, @SuppressWarnings("rawtypes") DelegatorTileEntity aTo) {return move (aFrom, aTo, Long.MAX_VALUE);}
@@ -1086,10 +1016,8 @@ public enum FL {
 
 	public static String name(Fluid aFluid, boolean aLocalized) {
 		if (aFluid == null) return "";
-		/** Замена {@code Fluid.getUnlocalizedName()} (Forge-1.7.10, метод на самом Fluid) — в neo
-		 *  unlocalized-имя живёт на {@link net.neoforged.neoforge.fluids.FluidType} и достаётся через
-		 *  реальный {@code FluidType.getDescriptionId()} (`FluidType.java:146-149`), а НЕ реконструируется
-		 *  из имени вручную. */
+		/** Replaces Fluid.getUnlocalizedName() (a Forge 1.7.10 method on Fluid itself): the unlocalized name now
+		 *  lives on FluidType and is fetched through its real getDescriptionId(), not reconstructed by hand. */
 		if (!aLocalized) return aFluid.getFluidType().getDescriptionId();
 		FluidGT tGT = FluidGT.of(aFluid);
 		if (tGT != null) return LH.get(tGT.getUnlocalizedName());
@@ -1115,26 +1043,17 @@ public enum FL {
 		return rStacks;
 	}
 	
-	/** 1:1 с оригиналом: карту заполняет ТОЛЬКО {@code BlockBaseFluid} (порт — BlockBaseFluid.java:110,
-	 *  оригинал — gregtech6/.../BlockBaseFluid.java:90). Мировые water-блоки (Ocean/River/Swamp) себя сюда
-	 *  не кладут и в 1.7.10; потребитель (родник, MultiTileEntityFluidSpring:114) на этот случай имеет
-	 *  фолбэк на блок самой жидкости — как и оригинал (:110-111). */
+	/** Matches the original exactly: only BlockBaseFluid registers itself here, not the world water blocks;
+	 *  callers that need those already fall back to the fluid's own block, as the original did too. */
 	public static final Map<String, Block> BLOCKS = new HashMap<>();
 
-	// F5, oredict-fluid-container-registry: bookkeeping-реестр (кто какой FluidContainerData зарегистрировал)
-	// восстановлен 1:1 — это GT6-own учёт (читают gregtech.loaders.c.Loader_Recipes_Foreign для
-	// генерации Canner/Squeezer-рецептов, gregapi.NEI_RecipeMap для отображения в NEI), а не Forge-специфичное
-	// поведение. net.minecraftforge.fluids.FluidContainerRegistry (владелец типа FluidContainerData) —
-	// compile-mirror shim (F2-приём, весь пакет net.minecraftforge отсутствует на classpath).
+	// This bookkeeping registry (who registered which container) is GT6's own accounting, read by the
+	// Canner/Squeezer recipe generator and NEI display, not Forge-specific behavior.
 	public static final Map<ItemStackContainer, FluidContainerData> FULL_TO_DATA = new ItemStackMap<>();
 	public static final Map<ItemStackContainer, Map<String, FluidContainerData>> EMPTY_TO_FLUID_TO_DATA = new ItemStackMap<>();
 
-	// F5 impossible-1:1-global (программный FL.fill/getFluid РЕАЛИЗОВАН; глобальный right-click auto-fill удалён в neo — per-item capability, GT6-контейнеры через behaviors, foreign absent), decisions/F5-fluids.md §3,8: единственная ЧАСТЬ
-	// Forge-1.7.10 FluidContainerRegistry БЕЗ neo-аналога — авто fill/drain ЛЮБОГО зарегистрированного
-	// full<->empty контейнера через item-взаимодействие (напр. вёдер) — 26.1.2 использует
-	// BucketItem+capability на КАЖДЫЙ контейнер отдельно (нет глобального auto-interaction поверх реестра).
-	// Bookkeeping (кто зарегистрирован — выше) восстановлен честно; сам auto-fill/drain-хук — отдельный шов
-	// (уже гейтится в {@code UT.Fluids.fill}, "item-capability бакет/канистра"), не здесь.
+	// The one part of Forge's FluidContainerRegistry with no neo equivalent: automatic fill/drain for any
+	// registered container through plain item interaction; neo instead attaches capability per item type.
 	public static void reg(FluidStack aFluid, ItemStack aFull, ItemStack aEmpty) {
 		reg(aFluid, aFull, aEmpty, F);
 	}
@@ -1156,22 +1075,15 @@ public enum FL {
 		FluidContainerRegistry.registerFluidContainer(aData);
 	}
 
-	/**
-	 * Завести пару полный↔пустой, НЕ вытесняя уже занятую — эквивалент {@code FluidContainerRegistry
-	 * .registerFluidContainer} 1.7.10, который возвращал false на занятой паре (`FL.java:1139` оригинала).
-	 *
-	 * @return T — пара заведена; F — место занято, вызывающему остаётся рецепт-фолбэк, как в оригинале.
-	 */
+	/** Registers a full<->empty pair without evicting one already claiming that slot, matching the original,
+	 *  which returned false on a taken pair so the caller could fall back to a recipe instead. */
 	public static boolean regIfFree(FluidStack aFluid, ItemStack aFull, ItemStack aEmpty) {
 		if (aFluid == null || ST.invalid(aFull) || ST.invalid(aEmpty)) return F;
 		ItemStackContainer tEmpty = new ItemStackContainer(aEmpty);
 		String tFluidName = FluidGT.nameOf(aFluid.getFluid());
 		Map<String, FluidContainerData> tByFluid = EMPTY_TO_FLUID_TO_DATA.get(tEmpty);
-		// ЗАНЯТОСТЬ СУДИТСЯ ПО ПАРЕ «пустой + жидкость», а НЕ по полному контейнеру. Первая редакция
-		// отвергала пару, если такой полный стек уже был в FULL_TO_DATA, — и отсекала почти все зелья:
-		// их «полный контейнер» задан МЕТОЙ 1.7.10 (`ST.make(Items.POTION, 1, 8194)`), а в neo мета у зелья
-		// мертва, поэтому стек у них ОДИН И ТОТ ЖЕ, и первая же жидкость занимала место для всех прочих.
-		// Наливание ищет именно по (пустой, жидкость) — `fill(...)` берёт EMPTY_TO_FLUID_TO_DATA.
+		// Occupancy is judged by (empty container, fluid), not by the full stack: potions all share one stack
+		// (their 1.7.10 meta is dead in neo), so keying on the full stack let the first fluid claim the slot for all.
 		if (tByFluid != null && tByFluid.containsKey(tFluidName)) return F;
 		reg(new FluidContainerData(aFluid, aFull, aEmpty, F));
 		return T;
@@ -1205,8 +1117,8 @@ public enum FL {
 			return NI;
 		}
 		if (aIsNonCannerCheck && IL.GC_Canister.exists() && (IL.GC_Canister.equal(aStack, T, T) || ST.equal(ST.container(aStack, T), IL.GC_Canister.wild(1)))) return aStack;
-		// F5/BUG-045 (1:1): контейнер-предмет — восстановленный IFluidContainerItem (compat-mirror; оригинал :946).
-		// Множество 1:1 с оригиналом: ItemFluidDisplay, MTE-ёмкости (Кувшин и др.), TE-базы; НЕ MultiItem.
+		// Item-container branch restored from the original IFluidContainerItem compat mirror; covers display
+		// items, tank-bearing tile entities and similar, but not MultiItem.
 		if (aCheckIFluidContainerItems && aStack.getItem() instanceof IFluidContainerItem tICI && tICI.getCapacity(ST.amount(1, aStack)) > 0) {
 			ItemStack tOne = ST.amount(1, aStack); FluidStack tCur = tICI.getFluid(tOne);
 			if ((tCur == null || (equal(tCur, aFluid) && tCur.getAmount() < tICI.getCapacity(tOne))) && (aAllowPartialFilling || tICI.getCapacity(tOne) <= aFluid.getAmount())) {
@@ -1215,7 +1127,7 @@ public enum FL {
 				return tOne;
 			}
 		}
-		// F5 (1:1): FULL_TO_DATA/EMPTY_TO_FLUID_TO_DATA-реестр (bookkeeping восстановлен) — фикс empty->filled контейнеры.
+		// Falls back to the EMPTY_TO_FLUID_TO_DATA registry this class rebuilds, to fill vanilla-style empty containers.
 		Map<String, FluidContainerData> tFluidToContainer = EMPTY_TO_FLUID_TO_DATA.get(new ItemStackContainer(aStack));
 		if (tFluidToContainer == null) return NI;
 		FluidContainerData tData = tFluidToContainer.get(FluidGT.nameOf(aFluid.getFluid()));
@@ -1242,7 +1154,7 @@ public enum FL {
 			return NI;
 		}
 		if (aIsNonCannerCheck && IL.GC_Canister.exists() && (IL.GC_Canister.equal(aStack, T, T) || ST.equal(ST.container(aStack, T), IL.GC_Canister.wild(1)))) return aStack;
-		// F5/BUG-045 (1:1): контейнер-предмет — восстановленный IFluidContainerItem (оригинал :980); слив из танка.
+		// Item-container branch restored from the original IFluidContainerItem compat mirror; this is the tank-drain case.
 		if (aCheckIFluidContainerItems && aStack.getItem() instanceof IFluidContainerItem tICI && tICI.getCapacity(ST.amount(1, aStack)) > 0) {
 			ItemStack tOne = ST.amount(1, aStack); FluidStack tCur = tICI.getFluid(tOne);
 			if ((tCur == null || (equal(tCur, aFluid) && tCur.getAmount() < tICI.getCapacity(tOne))) && (aAllowPartialFilling || tICI.getCapacity(tOne) <= aFluid.getAmount())) {
@@ -1251,7 +1163,7 @@ public enum FL {
 				return tOne;
 			}
 		}
-		// F5 (1:1): EMPTY_TO_FLUID_TO_DATA-реестр — фикс empty->filled контейнеры; слив из танка.
+		// Same EMPTY_TO_FLUID_TO_DATA fallback as the other fill() overload, but draining straight from the tank.
 		Map<String, FluidContainerData> tFluidToContainer = EMPTY_TO_FLUID_TO_DATA.get(new ItemStackContainer(aStack));
 		if (tFluidToContainer == null) return NI;
 		FluidContainerData tData = tFluidToContainer.get(FluidGT.nameOf(aFluid.getFluid()));
@@ -1260,8 +1172,8 @@ public enum FL {
 		return ST.amount(1, tData.filledContainer);
 	}
 
-	/** F5/BUG-045 (1:1): содержит ли контейнер данную жидкость. IFluidContainerItem-ветка восстановлена
-	 *  (compat-mirror; оригинал :996-1001, aFluid.isFluidEqual -> центр equal с data-компонентами). */
+	/** Item-container branch restored from IFluidContainerItem; fluid equality now routes through the central
+	 *  component-aware equal() instead of the old isFluidEqual. */
 	public static boolean contains(ItemStack aStack, FluidStack aFluid, boolean aCheckIFluidContainerItems) {
 		if (ST.invalid(aStack) || aFluid == null) return F;
 		if (aCheckIFluidContainerItems && aStack.getItem() instanceof IFluidContainerItem tICI && tICI.getCapacity(aStack) > 0) return equal(tICI.getFluid(ST.amount(1, aStack)), aFluid);
@@ -1269,8 +1181,7 @@ public enum FL {
 		return tData != null && equal(tData.fluid, aFluid, T);
 	}
 
-	/** F5/BUG-045 (1:1): жидкость в контейнере. IFluidContainerItem-ветка восстановлена (compat-mirror;
-	 *  оригинал :1003-1012, drain-снимок + гейт универсальной ячейки IC2). */
+	/** Item-container branch restored from IFluidContainerItem: a drain snapshot gated by the IC2 universal-cell check. */
 	public static FluidStack getFluid(ItemStack aStack, boolean aCheckIFluidContainerItems) {
 		if (ST.invalid(aStack)) return NF;
 		if (aCheckIFluidContainerItems && aStack.getItem() instanceof IFluidContainerItem tICI && tICI.getCapacity(aStack) > 0) {
@@ -1282,8 +1193,8 @@ public enum FL {
 		return tData == null ? NF : tData.fluid.copy();
 	}
 
-	/** F5/BUG-045 (1:1): пустой контейнер после слива. IFluidContainerItem-ветка восстановлена (compat-mirror;
-	 *  оригинал :1014-1025 — drain до пустоты + очистка пустого NBT; ItemNBT.set(null) = снятие CUSTOM_DATA). */
+	/** Item-container branch restored from IFluidContainerItem: drains to empty and clears its NBT;
+	 *  ItemNBT.set(null) removes the CUSTOM_DATA component entirely. */
 	public static ItemStack getEmpty(ItemStack aStack, boolean aCheckIFluidContainerItems) {
 		if (ST.invalid(aStack)) return NI;
 		FluidContainerData tData = FULL_TO_DATA.get(new ItemStackContainer(aStack));
@@ -1298,11 +1209,8 @@ public enum FL {
 		return NI;
 	}
 
-	/** F3/BUG-049: ЕДИНЫЙ резолвер still-иконки жидкости (1:1 смысл Fluid.getStillIcon из 1.7.10):
-	 *  GT6-жидкость — своя текстура из центра F5 (FluidGT.mTexture); ванильная лава — канонический спрайт
-	 *  движка; всё остальное БЕЗ своей текстуры (ванильная вода, GT6-воды типа seawater — в 1.7.10 они брали
-	 *  ваниль-иконку воды) — water_still, цвет даёт вызывающий (RGBa центра F5 / водный тинт).
-	 *  Потребители: ItemFluidDisplay.stillIcon (делегат) и BlockTextureFluid — копий не заводить. */
+	/** Single resolver for a fluid's still icon: a GT6 fluid uses its own texture, vanilla lava uses the
+	 *  engine's canonical sprite, and everything else (including GT6 seawater) falls back to water_still. */
 	public static Identifier stillIcon(Fluid aFluid) {
 		if (aFluid == null) return null;
 		FluidGT tGT = FluidGT.of(aFluid);
@@ -1315,11 +1223,8 @@ public enum FL {
 	public static FluidStack load (CompoundTag aNBT, String aTagName) {return aNBT == null ? null : load(aNBT.getCompoundOrEmpty(aTagName));}
 	/** Loads a FluidStack properly. */
 	public static FluidStack load (CompoundTag aNBT) {return aNBT == null || aNBT.isEmpty() ? null : load_(aNBT);}
-	/** Loads a FluidStack properly.
-	 *  F5 functional-adapted (типовой случай имя+объём 1:1; доп. data-компоненты нужен RegistryOps): 1.7.10 хранил произвольный дополнительный NBT-тег
-	 *  ("Tag", напр. состав смеси) прямо на FluidStack; в neo эквивалент — data-компоненты, для
-	 *  восстановления которых нужен registry-aware {@code DynamicOps} (RegistryOps), недоступный в этом
-	 *  статическом контексте без Level/RegistryAccess под рукой — не восстанавливается, только имя+объём. */
+	/** Loads a FluidStack properly; restores name and amount only, since restoring extra data components
+	 *  would need a registry-aware DynamicOps that this static context has no access to. */
 	public static FluidStack load_(CompoundTag aNBT) {
 		if (aNBT == null) return null;
 		String aName = aNBT.getStringOr("FluidName", "");
@@ -1348,7 +1253,7 @@ public enum FL {
 		if (tNBT != null) aNBT.put(aTagName, tNBT);
 		return aNBT;
 	}
-	/** было {@code aFluid.writeToNBT(aNBT)} (1.7.10 FluidStack — пишет В переданный tag) — neo: воспроизводим save+merge. */
+	/** Replaces 1.7.10's write-into-existing-tag FluidStack.writeToNBT by saving and merging instead. */
 	public static CompoundTag writeToNBT(FluidStack aFluid, CompoundTag aNBT) {
 		CompoundTag tNBT = save(aFluid);
 		return tNBT == null ? aNBT : aNBT.merge(tNBT);
@@ -1356,8 +1261,8 @@ public enum FL {
 
 	/** Saves a FluidStack properly. */
 	public static CompoundTag save (FluidStack aFluid) {return FL.invalid(aFluid) ? null : save_(aFluid);}
-	/** Saves a FluidStack properly. F5 functional-adapted (типовой случай 1:1) — см. {@link #load_}: пишет
-	 *  только имя+объём (1:1 для типового случая), дополнительные data-компоненты не сериализуются. */
+	/** Saves a FluidStack properly.
+	 *  Writes only name and amount, matching {@link #load_}; extra data components are not serialized. */
 	public static CompoundTag save_(FluidStack aFluid) {
 		CompoundTag rNBT = NBT.make();
 		rNBT.putString("FluidName", FluidGT.nameOf(aFluid.getFluid()));
@@ -1385,20 +1290,12 @@ public enum FL {
 	
 	@SafeVarargs public static FluidGT create(String aName, String aLocalized, OreDictMaterial aMaterial, int aState, Set<String>... aFluidList) {return create(aName, aLocalized, aMaterial, aState, 1000, 300, null, null, 0, aFluidList);}
 	@SafeVarargs public static FluidGT create(String aName, String aLocalized, OreDictMaterial aMaterial, int aState, long aAmountPerUnit, long aTemperatureK, Set<String>... aFluidList) {return create(aName, aLocalized, aMaterial, aState, aAmountPerUnit, aTemperatureK, null, null, 0, aFluidList);}
-	// путь текстуры: пробел → «_» (neo Identifier отвергает пробел; имя ЖИДКОСТИ не трогаем — рецепты ссылаются на «molten hsla»)
+	// Texture path spaces become underscores since neo Identifier rejects them; the fluid's own name is
+	// left untouched because recipes reference it directly.
 	@SafeVarargs public static FluidGT create(String aName, String aLocalized, OreDictMaterial aMaterial, int aState, long aAmountPerUnit, long aTemperatureK, java.util.function.Supplier<ItemStack> aFullContainer, java.util.function.Supplier<ItemStack> aEmptyContainer, int aFluidAmount, Set<String>... aFluidList) {return create(aName, new Textures.BlockIcons.CustomIcon("fluids/" + aName.toLowerCase().replace(' ', '_')), aLocalized, aMaterial, null, aState, aAmountPerUnit, aTemperatureK, aFullContainer, aEmptyContainer, aFluidAmount, aFluidList);}
 
-	/**
-	 * Регистрирует ОДНУ GT6-жидкость (данные 1:1 из вызывающего кода) через {@link FluidGT}
-	 * (расщепление Fluid->FluidType+Fluid в neo, decisions/F5-fluids.md §3) вместо старого
-	 * forge-1.7.10 {@code Fluid}. Идемпотентность: если {@code aName} уже зарегистрировано КАК
-	 * GT6-жидкость (повторный вызов create для того же имени), донастраивается СУЩЕСТВУЮЩИЙ
-	 * {@link FluidGT}, а не создаётся новый (ближайший 1:1 смысл старого
-	 * "{@code FluidRegistry.registerFluid} вернул false -> подстроиться под уже существующую").
-	 * F5 foreign-gated (межмод-усыновление жидкости, редкий случай, decisions/F5-fluids.md §8): "усыновление" уже
-	 * зарегистрированной ЧУЖИМ модом (не GT6) жидкости с тем же именем — структурно невозможно с
-	 * DeferredRegister (регистрирует только свои записи), не воспроизведено.
-	 */
+	/** Registers one GT6 fluid through {@link FluidGT} (the neo Fluid/FluidType split) instead of the old
+	 *  Forge Fluid; a repeat call for an already-registered name reconfigures the existing instance in place. */
 	@SafeVarargs
 	public static FluidGT create(String aName, IIconContainer aTexture, String aLocalized, OreDictMaterial aMaterial, short[] aRGBa, int aState, long aAmountPerUnit, long aTemperatureK, java.util.function.Supplier<ItemStack> aFullContainer, java.util.function.Supplier<ItemStack> aEmptyContainer, int aFluidAmount, Set<String>... aFluidList) {
 		aName = aName.toLowerCase();
@@ -1427,8 +1324,8 @@ public enum FL {
 			if (aMaterial.contains(TD.Properties.MAGICAL )) FluidsGT.MAGIC.add(aName);
 			if (aMaterial.contains(TD.Properties.GLOWING )) rFluid.setLuminosity(Math.max(rFluid.getLuminosity(), 5));
 			if (aMaterial.contains(TD.Properties.LIGHTING)) rFluid.setLuminosity(Math.max(rFluid.getLuminosity(), 15));
-			// F12/F5: source-Fluid привязан только ПОСЛЕ RegisterEvent (rFluid.getFluid() до этого не резолвится) →
-			// ассоциация material↔FluidStack отложена на server-start (post-bind), как остальной stack-init (GT_API.deferItemInit).
+			// The source Fluid only resolves after RegisterEvent, so binding it to a material is deferred to
+			// server start alongside the rest of stack init.
 			final gregapi.fluid.FluidGT fFluid = rFluid;
 			final gregapi.oredict.OreDictMaterial fMaterial = aMaterial;
 			final int fState = aState, fAmount = UT.Code.bindInt(aAmountPerUnit);
@@ -1451,23 +1348,18 @@ public enum FL {
 			}
 		}
 		
-		// F5, BUG-118. Оригинал (`FL.java:1139-1140`) СНАЧАЛА регистрировал пару полный↔пустой и лишь при
-		// НЕУДАЧЕ добавлял рецепт Канистры. Порт регистрацию выбросил, сочтя, что neo-аналога нет, — и это
-		// была неверная посылка: аналог есть, и он СВОЙ. `FL.set(...)` заполняет карты `FULL_TO_DATA` /
-		// `EMPTY_TO_FLUID_TO_DATA`, по которым работает `FL.fill(...)`/`drain(...)`; именно так заводит пару
-		// соседний метод `reg(...)`. Без регистрации пара была лишь у тех жидкостей, кому её прописали
-		// отдельным `FL.reg` (20 записей), тогда как контейнер задают 96 — остальные не наливались вовсе.
-		// Симптом, по которому это нашли: 4 записи лута `gt.bottles` теряли стак (`Loader_Loot:396-414`).
+		// The original always registered the full/empty container pair and only added the canister recipe on
+		// failure; the port had dropped that registration, silently leaving containers without a reg() call unfillable.
 		if (aFullContainer != null && aEmptyContainer != null) {
-			// F12/F5: контейнер-Supplier зовётся на server-start (ST.make внутри создаёт стек — компоненты привязаны только там);
-			// rFluid.getFluid() тоже привязан после RegisterEvent. Весь контейнер-шов отложен (register рано / стек поздно).
+			// The container supplier only runs at server start, since building the stack needs components that are
+			// not bound yet; the source fluid resolves at the same late point too.
 			final java.util.function.Supplier<ItemStack> fFull = aFullContainer, fEmpty = aEmptyContainer;
 			final gregapi.fluid.FluidGT fReg = rFluid;
 			final int fAmt = aFluidAmount;
 			gregapi.GT_API.deferItemInit(() -> {
 				ItemStack tFull = fFull.get(), tEmpty = fEmpty.get();
 				FluidStack tFluid = make(fReg.getFluid(), fAmt);
-				// 1:1 с оригиналом: рецепт — ФОЛБЭК, а не всегда. Пара занята другим — регистрация «не удалась».
+				// Matches the original: the recipe is only a fallback, used when the container pair is already taken.
 				if (!regIfFree(tFluid, tFull, tEmpty)) RM.Canner.addRecipe1(T, 16, Math.max(fAmt / 64, 16), tFull, NF, tFluid, ST.container(tFull, F));
 			});
 		}

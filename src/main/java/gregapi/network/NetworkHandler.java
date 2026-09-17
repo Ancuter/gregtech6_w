@@ -114,7 +114,7 @@ public final class NetworkHandler implements INetworkHandler {
 		}
 		PayloadRegistrar tRegistrar = aEvent.registrar(networkVersion());
 		for (NetworkHandler tHandler : tHandlers) tHandler.registerPayload(tRegistrar);
-		// F7-lifecycle (boot-подтверждено: NetworkHandler создаются вовремя)
+		// Confirmed at boot: NetworkHandler instances exist in time for this registration.
 	}
 
 	private void registerPayload(PayloadRegistrar aRegistrar) {
@@ -126,10 +126,8 @@ public final class NetworkHandler implements INetworkHandler {
 		if (tPacket == null) return;
 		aContext.enqueueWork(() -> {
 			BlockGetter tWorld = getProcessingWorld(aContext);
-			// НАДЁЖНЫЙ МОСТ (репорт игрока: worldgen-MTE невидимы в стартовой области при входе): даже на
-			// ChunkWatchEvent.Sent координатный GT6-пакет может обгонять чанк при логин-очереди (chunk-sender
-			// троттлит бандл, payload-канал — нет) → блока ещё нет → пакет молча терялся → клиент-BE не создавался.
-			// Вместо гонки — буфер: пакет в незагруженный чанк откладывается и доигрывается по тикам (processPending).
+			// A coordinate packet can outrace its chunk during login, since the chunk sender throttles but this payload
+			// channel doesn't; the block isn't there yet, so the packet is buffered and replayed on tick instead.
 			if (tWorld instanceof Level tLevel && tLevel.isClientSide() && tPacket instanceof gregapi.network.packets.PacketCoordinates tPC
 			 && !tLevel.hasChunkAt(new BlockPos(tPC.mX, tPC.mY, tPC.mZ))) {
 				queuePending(tPC, this);
@@ -139,16 +137,15 @@ public final class NetworkHandler implements INetworkHandler {
 		});
 	}
 
-	// ---- Клиентский буфер отложенных координатных пакетов (пакет обогнал чанк) ----
 	private static final class PendingPacket {
-		final gregapi.network.packets.PacketCoordinates mPacket; final NetworkHandler mHandler; int mTTL = 600; // ~30с
+		final gregapi.network.packets.PacketCoordinates mPacket; final NetworkHandler mHandler; int mTTL = 600; // Roughly 30 seconds before this pending packet is given up on.
 		PendingPacket(gregapi.network.packets.PacketCoordinates aPacket, NetworkHandler aHandler) {mPacket = aPacket; mHandler = aHandler;}
 	}
 	private static final java.util.ArrayDeque<PendingPacket> PENDING = new java.util.ArrayDeque<>();
 	private static void queuePending(gregapi.network.packets.PacketCoordinates aPacket, NetworkHandler aHandler) {
 		synchronized (PENDING) {if (PENDING.size() < 8192) PENDING.add(new PendingPacket(aPacket, aHandler));}
 	}
-	/** Доигрывание отложенных пакетов (зовёт клиент-тик GT_API_Proxy_Client); aWorld — текущий клиент-Level. */
+	/** Replays deferred packets; called from the client tick, aWorld is the current client Level. */
 	public static void processPending(Level aWorld) {
 		if (aWorld == null) {synchronized (PENDING) {PENDING.clear();} return;}
 		java.util.List<PendingPacket> tReady = null;

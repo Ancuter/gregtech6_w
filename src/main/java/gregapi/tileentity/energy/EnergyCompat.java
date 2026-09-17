@@ -40,9 +40,8 @@ import static gregapi.data.CS.*;
  * For mostly Internal Use.
  */
 public class EnergyCompat {
-	// Э0 (AE2 26.1): AE_ENERGY снят из списка. Флаг сторожил спец-случай «EU напрямую в AE2» —
-	// appeng.tile.powersink.IC2 (AE2 rv2 реализовывал приёмник энергии IC2 сам). В AE2 26.1 такого класса
-	// нет: сеть принимает только FE. Выход GT6 на FE-капу движка — этап Э5, здесь ветка просто снята.
+	// AE2 26.1's network only accepts FE, and the class this flag guarded (a direct EU sink AE2 rv2 implemented
+	// itself) no longer exists, so the branch is simply removed; GT6's FE bridge lives elsewhere.
 	public static boolean RF_ENERGY = F, RF_ENERGY_NEW = F, FL_ENERGY = F, WD_ENERGY = F, IC_ENERGY = F, BB_ENERGY = F, GC_ENERGY = F, BC_LASER = F, XM_ROTATION = F;
 	
 	/** Gets Called once during postInit to see which Interfaces are there and Classloaded. */
@@ -132,7 +131,7 @@ public class EnergyCompat {
 		// IMPORTANT: Ignore the Fact that this SEEMS to be unused. It does exist, SOMETIMES.
 		if (aTarget instanceof gregtech.api.interfaces.tileentity.IEnergyConnected) return ((gregtech.api.interfaces.tileentity.IEnergyConnected)aTarget).inputEnergyFrom(aSide) || ((gregtech.api.interfaces.tileentity.IEnergyConnected)aTarget).outputsEnergyTo(aSide);
 		
-		// Э0 (AE2 26.1): ветка AE_ENERGY (appeng.tile.powersink.IC2) снята — носителя нет, см. поле выше.
+		// Branch removed for the same reason as the field above: its carrier class no longer exists.
 
 		if (FL_ENERGY && (aTarget instanceof com.rwtema.funkylocomotion.blocks.TilePusher || aTarget instanceof com.rwtema.funkylocomotion.blocks.TileBooster)) return T;
 		
@@ -151,18 +150,15 @@ public class EnergyCompat {
 		// IMPORTANT: Ignore the Fact that IEnergyConnection is SUPPOSEDLY part of IEnergyHandler. There is versions of the RF API in circulation, where this is NOT the case!!!
 		if (RF_ENERGY && (EMIT_EU_AS_RF || isElectricRFReceiver(aTarget)) && (aTarget instanceof cofh.api.energy.IEnergyHandler || (RF_ENERGY_NEW && aTarget instanceof cofh.api.energy.IEnergyReceiver))) return !(aTarget instanceof cofh.api.energy.IEnergyConnection) || ((cofh.api.energy.IEnergyConnection)aTarget).canConnectEnergy(FORGE_DIR[aSide]);
 
-		// Э5, БЛОЧНОЕ ПЛЕЧО: FE-капа движка. Носитель RF-плеча выше (cofh.api.energy) — API мода 1.7.10,
-		// в 26.1 его нет, и RF_ENERGY всегда F. Смысл ветки переносится на движковую капу
-		// Capabilities.Energy.BLOCK (neoforge Capabilities:22): её отдают и Energy Acceptor AE2 (все
-		// AEBasePoweredBlockEntity, InitCapabilityProviders:82-83), и любой FE-приёмник вообще.
-		// Гейт ТОТ ЖЕ, что у RF-плеча: ключ Emit_EU_as_RF_from_Blocks либо белый список электро-приёмников.
+		// The RF-arm's carrier API doesn't exist in 26.1, so RF_ENERGY is always false; its meaning moves to the
+		// engine's own Capabilities.Energy.BLOCK, which AE2's Energy Acceptor and every other FE receiver already implement.
 		if ((EMIT_EU_AS_RF || isElectricRFReceiver(aTarget)) && feHandler(aTarget, aSide) != null) return T;
 
 		return F;
 	}
 
-	/** Э5: FE-приёмник соседа со стороны {@code aSide}, движковой капой. Одно место на весь мод — его
-	 *  спрашивают и предикат связи, и вставка энергии; больше эту капу не спрашивает никто. */
+	/** Neighbor's FE receiver capability on a given side, the one place in the mod that asks it, for both the connection
+	 *  predicate and energy insertion. */
 	public static net.neoforged.neoforge.transfer.energy.EnergyHandler feHandler(BlockEntity aReceiver, byte aSide) {
 		if (aReceiver == null || aReceiver.getLevel() == null) return null;
 		try {
@@ -208,19 +204,8 @@ public class EnergyCompat {
 			aSize = Math.abs(aSize);
 			
 			// Applied Energistics gets a special case.
-			// Э0 (AE2 26.1): спец-случай снят — в 1.7.10 AE2 сам реализовывал приёмник EU
-			// (appeng.tile.powersink.IC2), в 26.1 этого класса нет и сеть принимает только FE.
-			//
-			// Э5, БЛОЧНОЕ ПЛЕЧО — тот самый выход на FE. Ветка стоит ЗДЕСЬ, а не у AE2: капа движковая, и
-			// через неё энергию примет любой FE-приёмник, не только Energy Acceptor. Курс — авторский
-			// RF_PER_EU = 4 (CS:217), у AE2 свой множитель 0.5 (AEConfig DEFAULT_FE_EXCHANGE), итого 1 EU = 2 AE.
-			// Гейт тот же, что у мёртвого RF-плеча ниже: ключ Emit_EU_as_RF_from_Blocks либо белый список.
-			// ТРАНЗАКЦИЯ: новый transfer-API отделяет пробу от фиксации. У ЭТОГО метода параметра симуляции
-			// нет — он и есть настоящая вставка (RF-плечо ниже тоже зовёт receiveEnergy с simulate=F),
-			// поэтому транзакция коммитится сразу, как только приёмник что-то взял. Проба с откатом нужна
-			// предметному плечу (IItemEnergy.Utility, там есть aDoInject) — здесь её нет и быть не должно.
-			// Возвращаем ФАКТИЧЕСКИ принятое, делением на цену пакета — ровно как RF-плечо, поэтому
-			// частичный приём не теряет остаток и вызыватель списывает только то, что реально ушло.
+			// AE2's own EU receiver from 1.7.10 is gone, so the real FE exit lives here, at the engine cap level, reaching any FE
+			// receiver, not just AE2's Energy Acceptor; the rate is the mod's own RF_PER_EU=4 against AE2's 0.5, giving 1 EU = 2 AE.
 			if (EMIT_EU_AS_RF || isElectricRFReceiver(aReceiver)) {
 				net.neoforged.neoforge.transfer.energy.EnergyHandler tFE = feHandler(aReceiver, aSide);
 				if (tFE != null) {
@@ -228,7 +213,7 @@ public class EnergyCompat {
 					long tWanted = aAmount * aSize * RF_PER_EU;
 					try (net.neoforged.neoforge.transfer.transaction.Transaction tTx = net.neoforged.neoforge.transfer.transaction.Transaction.open(net.neoforged.neoforge.transfer.transaction.Transaction.getCurrentOpenedTransaction())) {
 						int tAccepted = tFE.insert(UT.Code.bind31(tWanted), tTx);
-						// aEmitter здесь может быть кем угодно; фиксируем только когда нас просят по-настоящему.
+						// aEmitter here can be anyone; the transaction commits only once something was actually accepted for real.
 						if (tAccepted > 0) tTx.commit();
 						return UT.Code.divup(tAccepted, aSize * RF_PER_EU);
 					} catch(Throwable e) {return 0;}

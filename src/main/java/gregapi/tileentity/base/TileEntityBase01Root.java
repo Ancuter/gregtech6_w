@@ -105,11 +105,8 @@ import static gregapi.data.CS.*;
  * 
  * The Functions all TileEntities should have.
  */
-// Э0 (AE2 26.1): снят @Optional.Interface appeng.api.movable.IMovableTile — интерфейса в AE2 26.1 НЕТ
-// (пакет appeng.api.movable там несёт BlockEntityMoveStrategies/IBlockEntityMoveStrategy). Пока его роль
-// исполняло зеркало src/compat-mirror/java/appeng/, а с подключением настоящего jar AE2 пакет appeng.*
-// оказался бы в ДВУХ модулях сразу (ModuleClassLoader.java:76-78 packageLookup.put — один молча затирает
-// другой). Методы prepareToMove()/doneMoving() — код самого GT6, остаются как обычные (см. ниже).
+// AE2 26.1's appeng.api.movable package no longer has IMovableTile; the interface is dropped since two
+// modules sharing that package name would silently overwrite each other's classes.
 public abstract class TileEntityBase01Root extends BlockEntity implements ITileEntity, ITileEntityGUI {
 	/** If this TileEntity checks for the Chunk to be loaded before returning World based values. If this is set to T, this TileEntity will not cause worfin' Chunks, uhh I mean orphan Chunks. */
 	public boolean mIgnoreUnloadedChunks = T;
@@ -129,115 +126,56 @@ public abstract class TileEntityBase01Root extends BlockEntity implements ITileE
 	/** This Variable is for forcing the Selection Box to be full. */
 	public boolean FORCE_FULL_SELECTION_BOXES = F;
 
-	/** BUG-063, ТОЛЬКО КЛИЕНТ: рамка отсечения отрисовки, снятая с последнего построенного кадра
-	 *  ({@link gregapi.render.MultiTileEntityBER#extractRenderState}). В 1.7.10 геометрия MTE жила в мэше чанка и
-	 *  отсекалась целой секцией 16³, поэтому вопроса не было; в neo рисунок BE отсекается по его собственной рамке,
-	 *  умолчание которой — куб 1×1×1, а геометрия GT6 выходит за свой блок (тигель 3×3×3 из контроллера, лопасти
-	 *  турбины, коннекторы труб). Не сохраняется и не синхронизируется: чисто визуальный кэш. */
+	/** Client-only clip box for the last built frame; 1.7.10 had no such question since MTE geometry lived in the
+	 *  chunk mesh, clipped whole by its 16-cube section. Purely visual, not saved or synced. */
 	public net.minecraft.world.phys.AABB mRenderAABB = null;
 
-	/** BUG-106 №4, ТОЛЬКО КЛИЕНТ: кэш квадов BER ({@link gregapi.render.MultiTileEntityBER#extractRenderState}).
-	 *  В 1.7.10 геометрия MTE жила в мэше секции и пересобиралась ТОЛЬКО по сигналу markBlockForUpdate
-	 *  (recompSrc RenderGlobal.markBlockForUpdate → секции ±1 блока); BER же строил её каждый кадр. Кэш
-	 *  возвращает гранулярность 1.7.10: сбрасывается тем же движковым сигналом (LevelRenderer.setSectionDirty —
-	 *  единственная воронка «картинка секции изменилась», см. MixinLevelRenderer). Валиден, пока
-	 *  {@code mQuadCacheEpoch == MultiTileEntityBER.sQuadEpoch} И {@code mQuadCacheSectionStamp} совпадает со
-	 *  штампом своей секции; сам список может быть null (MTE без квадов).
-	 *  Не сохраняется и не синхронизируется: чисто визуальный кэш, как mRenderAABB выше. */
+	/** Client-only quad cache for the BER; 1.7.10's MTE geometry lived in the section mesh and only rebuilt on
+	 *  markBlockForUpdate, so this cache restores that same granularity instead of rebuilding every frame. */
 	public java.util.List<net.minecraft.client.resources.model.geometry.BakedQuad> mQuadCache = null;
 	public long mQuadCacheEpoch = Long.MIN_VALUE;
-	/** Оттиск штампа СВОЕЙ секции на кадре постройки кэша (второе условие валидности рядом с эпохой). Сигнал
-	 *  setSectionDirty теперь не обходит блок-сущности, а печатает секцию — сверку делает сам MTE при рисовании,
-	 *  когда движок его и так вызвал (волна 3 консолидации, п.2). Long.MIN_VALUE = кэша не было (штамп
-	 *  непомеченной секции равен 0). */
+	/** Second validity check alongside the epoch: a stamp of Long.MIN_VALUE means no cache was ever built. */
 	public long mQuadCacheSectionStamp = Long.MIN_VALUE;
 
 	/** If this TileEntity is ticking at all */
 	public final boolean mIsTicking;
 	
-	// F-coord: neo BlockPos иммутабелен (нет no-arg ctor, полей posX/Y/Z) — 1.7.10 кэш-holder
-	// ChunkCoordinates удалён; getCoords() ниже отдаёт getBlockPos() напрямую (это и есть позиция BE).
+	// neo's BlockPos is immutable, so the old ChunkCoordinates cache-holder is gone; getCoords() below
+	// returns getBlockPos() directly, which already is the BE's position.
 
-	// F-tileentity-construction (#16): neo BlockEntity требует super(BlockEntityType<?>,BlockPos,BlockState)
-	// (нет no-arg ctor; BlockEntity.java:BlockEntity(type,pos,state), worldPosition protected final). GT6 —
-	// динамическая MultiTileEntity-система (32000 вариантов на ОДИН тип; канонические инстансы создаются
-	// рефлексией Class.newInstance() в MultiTileEntityClassContainer:52, мировые — движком через
-	// BlockEntityType.create(pos,state)). Единый центральный тип-плейсхолдер на весь TE-иерарх: реальный
-	// (не-null) объект через публичный ctor BlockEntityType(BlockEntitySupplier,Block...) с пустым набором
-	// valid-блоков (isValid()==false) и factory→null. Канонические инстансы им НЕ создаются (рефлексия),
-	// им нужен лишь непустой аргумент super(). РЕАЛЬНАЯ регистрация типа в реестр (мировое размещение) —
-	// тот же отложенный ADR, что и в GT_API.java:872 (динамическая модель к статичному BlockEntityType neo
-	// не сводится 1:1 без ADR; не выдумываю). PLACEHOLDER_POS/STATE — ZERO/AIR (у канонических инстансов
-	// позиция не используется; у мировых движок задаёт реальную через create(pos,state) до loadAdditional).
-	// F12-followup (MTE-type-timing): создание BlockEntityType зовёт createIntrusiveHolder → нужен РАЗМОРОЖЕННЫЙ реестр
-	// (только на RegisterEvent<BlockEntityType>). Прежде поле было static final с инициализатором в <clinit>, который
-	// срабатывал ЛЕНИВО при первой загрузке класса (newInstance канонического инстанса на server-start, после freeze) →
-	// «Registry is already frozen». Теперь тип создаётся и РЕГИСТРИРУЕТСЯ через GT_API.BLOCK_ENTITIES (supplier зовёт
-	// createType() на RegisterEvent, реестр открыт, intrusive-holder связывается) → к server-start MTE_TYPE уже готов.
+	// neo's BlockEntity has no no-arg constructor, but GT6's 32000 MTE variants share one dynamic type built by
+	// reflection; this placeholder type only needs a non-null constructor argument, not per-variant identity.
 	public static BlockEntityType<TileEntityBase01Root> MTE_TYPE;
-	/** ВТОРОЙ тип той же иерархии — носитель признака «этот MTE не тикает НИКОГДА».
-	 *
-	 *  <p>В 1.7.10 признак объявлял сам блок-энтити — Forge-хук {@code TileEntity.canUpdate()}, и оригинал GT6 его
-	 *  переопределяет ({@code gt6-original/.../TileEntityBase01Root.java:440}: {@code mIsTicking && mShouldRefresh}),
-	 *  а нетикающую половину иерархии выделяет отдельным пакетом {@code gregapi.tileentity.notick}. В neo вопроса
-	 *  «тикаешь ли ты» блок-сущности больше не задают — движок отбирает
-	 *  тикающих ИСКЛЮЧИТЕЛЬНО по возврату {@code EntityBlock.getTicker(level, state, type)}
-	 *  ({@code LevelChunk.updateBlockEntityTicker}: {@code ticker == null} → {@code removeBlockEntityTicker}), а
-	 *  сам блок-энтити в этот хук не передаётся. У GT6 все MTE делят ОДИН блок и один {@code BlockState}
-	 *  (реестр {@code gt.multitileentity}), поэтому по состоянию тикающего от нетикающего не отличить — единственный
-	 *  различитель, который движок даёт в этом хуке, это {@code BlockEntityType}.
-	 *
-	 *  <p>Отсюда второй тип: признак {@code mIsTicking} (final, известен в конструкторе — им же объявлена вся ветка
-	 *  {@code gregapi.tileentity.notick}, {@code super(F)}) выбирает тип, а {@code MultiTileEntityBlock.getTicker}
-	 *  читает его у движка на его же языке. Ничего своего вместо движкового механизма не заводится.
-	 *
-	 *  <p>Цена прежнего поведения — замер живого клиента 2026-08-20 (BUG-138): тикер выдавался ВСЕМ MTE, и движок
-	 *  каждый тик гонял по списку 43 500 блок-сущностей мира (камни 27 836, палки 8 522, кусты 3 583, родники,
-	 *  руда), спрашивая {@code Level.shouldTickBlocksAt} — 8,46 % профиля на отбор плюс 4,94 % на вызов лямбды,
-	 *  которая тут же выходила по {@code canUpdate()==false}.
-	 *
-	 *  <p>Совместимость миров: тип пишется в NBT как id блок-сущности. Старые миры несут {@code gregapi:mte} —
-	 *  фабрика отдаёт по нему стаб/руду ровно как раньше, а личность MTE восстанавливает реконструкция
-	 *  ({@code ChunkEvent.Load}), которая и создаёт объект с правильным из двух типов. Фабрика у типов одна и та же. */
+	/** neo picks tickers purely by BlockEntityType, with no per-instance question; since every MTE shares one
+	 *  BlockState, a second type is the only channel left to mark the whole non-ticking half of the hierarchy. */
 	public static BlockEntityType<TileEntityBase01Root> MTE_TYPE_NOTICK;
-	// neo валидирует пустой varargs valid-блоков → «pass Set.of() instead of an empty varag». Плейсхолдер намеренно без
-	// valid-блоков (канонические инстансы создаются рефлексией, не движком) → передаём Set.of() (осознанно пустой).
+	// neo rejects an empty varargs of valid blocks; the placeholder has none on purpose, since its
+	// canonical instances are built by reflection, not placed by the engine.
 	@SuppressWarnings({"unchecked", "rawtypes"})
-	// F-tileentity-construction (LOAD-путь): neo world-load зовёт supplier для реконструкции TE из NBT. Прежний ->null
-	// падал NPE (BlockEntity.loadStatic:206) на ЛЮБОМ сохранённом GT6-TE. Диспетчер по блоку: PrefixBlock-руды дают
-	// PrefixBlockTileEntity(pos,state) СРАЗУ (класс выводится из блока; loadAdditional дочитает mMetaData=материал); прочие
-	/** ⛔ ИМЕНОВАННЫЙ, А НЕ АНОНИМНЫЙ: анонимный подкласс копирует в свой конструктор имена параметров
-	 *  родителя из артефакта движка; на чистой машине они обфусцированы и повторяются, и компиляция падает
-	 *  («variable o is already defined», поймано сборкой выпуска 2026-08-20). Поведение прежнее. */
+	// World-load reconstructs a TE from NBT through this same supplier; ore blocks get their TE class
+	// straight from the block, other MTE need the stub below to await reconstruction.
+	/** Named, not anonymous: an anonymous subclass copies the parent constructor's obfuscated parameter
+	 *  names, which collide and fail to compile on a clean build. */
 	private static final class MTEBlockEntityType extends BlockEntityType<TileEntityBase01Root> {
 		MTEBlockEntityType(BlockEntityType.BlockEntitySupplier<TileEntityBase01Root> aSupplier) {super(aSupplier, java.util.Set.<Block>of());}
-		// F-tileentity-construction: MTE_TYPE — ОБЩИЙ placeholder-тип всей GT6-TE-иерархии (динамические блоки,
-		// valid-блоки не применимы). neo BlockEntityType.isValid(state) = validBlocks.contains(block) → пустой Set
-		// → всегда false → LevelChunk.setBlockEntity отклоняет TE. Override → true (валидность решает
-		// isValidBlockState на самом TE; тип общий). Чинит размещение ВСЕХ GT6-TE (PrefixBlock-руды и пр.).
+		// The placeholder type has no valid blocks, so neo's default isValid would reject every state;
+		// overriding it to true lets each TE decide its own validity instead.
 		@Override public boolean isValid(net.minecraft.world.level.block.state.BlockState aState) {return true;}
 	}
-	// GT6-TE (MTE-машины, класс = sub-ID из NBT, недоступен здесь) → TileEntityLoaderStub, реконструкция на ChunkEvent.Load.
-	// ФАБРИКА ОДНА на оба типа: они различают лишь участие в тике, а путь рождения объекта у них общий — второй
-	// экземпляр той же лямбды был бы дублем сущности.
+	// One factory serves both types, since they differ only in whether they tick, not in how the object is built.
 	@SuppressWarnings("unchecked")
 	private static final BlockEntityType.BlockEntitySupplier<TileEntityBase01Root> FACTORY =
 		(BlockEntityType.BlockEntitySupplier<TileEntityBase01Root>)(aPos, aState) -> aState.getBlock() instanceof gregapi.block.prefixblock.PrefixBlock ? new gregapi.block.prefixblock.PrefixBlockTileEntity(aPos, aState) : new TileEntityLoaderStub(aPos, aState);
 	public static BlockEntityType<TileEntityBase01Root> createType() {return MTE_TYPE = new MTEBlockEntityType(FACTORY);}
-	/** Тип нетикающей половины иерархии — см. {@link #MTE_TYPE_NOTICK}. Регистрируется рядом с основным. */
+	/** Type for the non-ticking half of the hierarchy, registered alongside the main one. */
 	public static BlockEntityType<TileEntityBase01Root> createTypeNoTick() {return MTE_TYPE_NOTICK = new MTEBlockEntityType(FACTORY);}
 
-	// F-tileentity-construction (ADR, placement-pos): реальная мировая pos у вручную-создаваемого MTE-TE. worldPosition в
-	// neo immutable (BlockEntity.java:48-59, ставится только super-ctor), а вся MTE-иерархия наследует no-arg-конструкторы
-	// (Class.newInstance канонических инстансов, MultiTileEntityClassContainer:52) — протянуть (BlockPos)-ctor через сотни
-	// классов = массовое дублирование (нарушение централизации). Централизованный канал: getNewTileEntityContainer выставляет
-	// PENDING_WORLD_POS перед созданием, no-arg-ctor подхватывает в super(). Пусто (канонический инстанс / item-form) → ZERO
-	// (позиция не нужна). 1:1-аналог удалённого 1.7.10 te.xCoord/yCoord/zCoord=aX/aY/aZ (то же назначение мировой позиции при
-	// создании TE в мире, иным механизмом — движок сменил модель на immutable-pos-в-конструкторе).
+	// neo's BlockEntity position is immutable and set only by the super constructor, but the whole MTE hierarchy
+	// inherits no-arg constructors; a thread-local carries the real position across the reflection-based construction instead.
 	public static final ThreadLocal<BlockPos> PENDING_WORLD_POS = new ThreadLocal<>();
 	private static BlockPos pendingPosOrZero() {BlockPos p = PENDING_WORLD_POS.get(); return p != null ? p : BlockPos.ZERO;}
 
-	/** Тип по признаку тика — единственная точка выбора на всю иерархию (см. {@link #MTE_TYPE_NOTICK}). */
+	/** Single point choosing the block-entity type by its ticking flag. */
 	private static BlockEntityType<TileEntityBase01Root> typeOf(boolean aIsTicking) {return aIsTicking ? MTE_TYPE : MTE_TYPE_NOTICK;}
 
 	public TileEntityBase01Root(boolean aIsTicking) {
@@ -245,26 +183,22 @@ public abstract class TileEntityBase01Root extends BlockEntity implements ITileE
 		mIsTicking = aIsTicking;
 	}
 
-	// F-tileentity-construction: конструктор с РЕАЛЬНОЙ позицией (worldPosition final, ставится только тут) — для ручного
-	// размещения GT6-TE (PrefixBlock-руды в ворлдгене): без неё TE садился на BlockPos.ZERO (0,0,0) → neo setBlockEntity
-	// ставил TE не туда («state does not allow it»). state=AIR — как в no-arg ctor (валидацию type отключает isValidBlockState).
+	// Constructor with a real position, for manually-placed GT6 TE (worldgen ore); without it the TE
+	// ended up cached at (0,0,0) and the engine rejected the placement.
 	public TileEntityBase01Root(boolean aIsTicking, BlockPos aPos) {
 		super(typeOf(aIsTicking), aPos, Blocks.AIR.defaultBlockState());
 		mIsTicking = aIsTicking;
 	}
 
-	// F-tileentity-construction (кэш-blockstate): ctor с РЕАЛЬНЫМ blockstate размещаемого блока. Без него TE кэширует
-	// AIR (2-арг выше), и neo при setBlockEntity логирует «Block state mismatch … updating» (LevelChunk:442, безвредно —
-	// сам чинит строкой 445), но это шум и неверный кэш до фикса. Передача точного state (= defaultBlockState блока, как
-	// ставит WD.set) убирает предупреждение и делает кэш верным 1:1 при ручном размещении GT6-TE (PrefixBlock-руды).
+	// Constructor with the real placed BlockState too, so the engine's cached state matches and doesn't
+	// need to self-correct with a mismatch warning.
 	public TileEntityBase01Root(boolean aIsTicking, BlockPos aPos, net.minecraft.world.level.block.state.BlockState aState) {
 		super(typeOf(aIsTicking), aPos, aState);
 		mIsTicking = aIsTicking;
 	}
 
-	// F12-followup (MTE-type): neo BlockEntity.<init> валидирует state против type.isValid(state); placeholder MTE_TYPE не
-	// имеет valid-блоков (Set.of()) → канонический инстанс (AIR-state) не прошёл бы → «Invalid block entity state».
-	// GT6 MTE — динамическая система (тип общий на всю иерархию, valid-блоки не применимы) → валидацию отключаем.
+	// The placeholder type has no valid blocks, so a canonical instance built with an AIR state would
+	// otherwise fail neo's state validation; GT6's dynamic type system overrides it.
 	@Override public boolean isValidBlockState(net.minecraft.world.level.block.state.BlockState aState) {return true;}
 	
 	@Override
@@ -280,19 +214,15 @@ public abstract class TileEntityBase01Root extends BlockEntity implements ITileE
 	// @Override
 	public void readFromNBT(CompoundTag aNBT) {
 		// load ID and Coords
-		// F8: BlockPos на BlockEntity в 26.1.2 неизменяем (worldPosition final, neo-decompiled
-		// BlockEntity.java:48) и уже выставлен движком через BlockEntityType.create(pos, state)
-		// до вызова loadAdditional (BlockEntity.java:190-207: loadStatic->type.create->
-		// loadWithComponents->loadAdditional) - назначить x/y/z из NBT (как в 1.7.10
-		// xCoord=aNBT.getInteger("x")) невозможно и не нужно, координата уже верна.
+		// neo's BlockEntity position is final, set by the engine before loadAdditional runs, unlike 1.7.10 reading it from NBT.
 		// make sure Y is not negative because this causes crashes.
-		if (WD.tileYInvalid(getLevel(), getBlockPos().getY())) WD.invalidateTileEntityWithNegativeYCoord(getBlockPos().getX(), getBlockPos().getY(), getBlockPos().getZ(), this); // было Y<0 — порог = дно мира getMinY() (бедрок MC26 Y=−64 легитимен)
+		if (WD.tileYInvalid(getLevel(), getBlockPos().getY())) WD.invalidateTileEntityWithNegativeYCoord(getBlockPos().getX(), getBlockPos().getY(), getBlockPos().getZ(), this); // the world floor is getMinY(), not 0, since bedrock legitimately sits below Y=0 in this engine
 	}
 
 	// @Override
 	public void writeToNBT(CompoundTag aNBT) {
 		// make sure Y is not negative because this causes crashes.
-		if (WD.tileYInvalid(getLevel(), getBlockPos().getY())) WD.invalidateTileEntityWithNegativeYCoord(getBlockPos().getX(), getBlockPos().getY(), getBlockPos().getZ(), this); // было Y<0 — порог = дно мира getMinY() (бедрок MC26 Y=−64 легитимен)
+		if (WD.tileYInvalid(getLevel(), getBlockPos().getY())) WD.invalidateTileEntityWithNegativeYCoord(getBlockPos().getX(), getBlockPos().getY(), getBlockPos().getZ(), this); // the world floor is getMinY(), not 0, since bedrock legitimately sits below Y=0 in this engine
 		// save ID and Coords
 		aNBT.putString("id", getTileEntityName());
 		aNBT.putInt("x", getBlockPos().getX());
@@ -300,20 +230,8 @@ public abstract class TileEntityBase01Root extends BlockEntity implements ITileE
 		aNBT.putInt("z", getBlockPos().getZ());
 	}
 
-	/**
-	 * F8 (шов «NBT-персистенс TileEntity», центр моста CompoundTag<->ValueIO — см.
-	 * decisions/F8-nbt-data-components.md §4.1): neo зовёт {@code saveAdditional(ValueOutput)}/
-	 * {@code loadAdditional(ValueInput)} (`neo-decompiled/net/minecraft/world/level/block/entity/
-	 * BlockEntity.java:101,115`), а не GT6-модель {@code writeToNBT}/{@code readFromNBT}(CompoundTag).
-	 * Единственный мост на весь мод - здесь, на корне TE-иерархии: собираем/разбираем CompoundTag
-	 * через {@link ValueOutputExtension#store(CompoundTag)} / {@link ValueInputExtension#keySet()}
-	 * (тот же приём: `input.read(MapCodec.assumeMapUnsafe(CompoundTag.CODEC))`, дословно как в
-	 * `neoforge-decompiled/net/neoforged/neoforge/common/extensions/ValueInputExtension.java:27`),
-	 * и прогоняем существующую GT6-цепочку writeToNBT/readFromNBT -> writeToNBT2/readFromNBT2 без
-	 * изменений. super.saveAdditional/super.loadAdditional вызываются первыми, чтобы сохранить
-	 * neo-собственные данные (NeoForgeData/attachments), как это делает эталон AE2
-	 * (`AEBaseBlockEntity.java:143,184`).
-	 */
+	/** neo's persistence hooks are saveAdditional(ValueOutput)/loadAdditional(ValueInput), not GT6's writeToNBT/
+	 *  readFromNBT(CompoundTag); this bridge converts once, here, then runs the existing GT6 NBT chain unchanged. */
 	@Override
 	protected void saveAdditional(ValueOutput output) {
 		super.saveAdditional(output);
@@ -329,37 +247,19 @@ public abstract class TileEntityBase01Root extends BlockEntity implements ITileE
 		readFromNBT(tNBT);
 	}
 
-	// F6-дедик КЛИЕНТ-СИНК ЛИЧНОСТИ MTE (корень «прозрачных блоков на выделенном сервере»).
-	// На ВЫДЕЛЕННОМ сервере клиент узнаёт о BE ровно двумя движковыми каналами: getUpdatePacket (у GT6 он null —
-	// TileEntityBase03TicksAndSync:96, синк идёт своим пакетом GT6) и getUpdateTag, который движок спрашивает при
-	// отправке чанка (ClientboundLevelChunkPacketData:154). База отдаёт ПУСТОЙ тег (BlockEntity:244), поэтому клиент
-	// получал MTE-BE без личности: фабрика MTE_TYPE даёт TileEntityLoaderStub, его mLoadedNBT остаётся null, и
-	// reconstructMTE выходит первой строкой — стаб не становится настоящим MTE, а стаб не IRenderedBlockObject →
-	// getRenderPasses=0 → блок прозрачен и зовётся сырым ключом. Замер дедика: MTE=217 real=0 stub=217.
-	// Компенсирующий канал мода (WORLDGEN_MTE + onChunkWatch/drainPendingSync) покрывает лишь чанки, СГЕНЕРИРОВАННЫЕ
-	// в текущей сессии сервера: при загрузке готового мира с диска записей нет и слать нечего — оттого дефект и виден
-	// на «настоящем» сервере, а в одиночке маскируется (там клиент и сервер делят один Level, синк не нужен вовсе).
-	// ⚠ Прежнее решение «не переопределять getUpdateTag» принималось по замерам В ОДИНОЧКЕ — в среде, где дефекта нет.
-	// Возражение того решения (saveCustomOnly = лишний трафик и утечка серверных полей на клиент) остаётся в силе и
-	// здесь УЧТЕНО: отдаётся не состояние, а ЛИЧНОСТЬ — два short'а, ровно то, чем реестр строит настоящий MTE.
-	// Данные отображения приходят прежним каналом GT6 (sendClientData) уже реконструированному объекту.
+	// On a dedicated server the client only learns a block entity's identity via getUpdateTag, since GT6's
+	// own sync packet can't reach a client that just loaded a saved chunk, leaving MTE as unidentified stubs.
 	@Override public net.minecraft.nbt.CompoundTag getUpdateTag(net.minecraft.core.HolderLookup.Provider aProvider) {
 		net.minecraft.nbt.CompoundTag rNBT = super.getUpdateTag(aProvider);
 		writeMTEIdentity(rNBT);
 		return rNBT;
 	}
 
-	/** Личность MTE (реестр + sub-ID) для клиентского пакета чанка. Пишут её носители полей — обе иерархии MTE;
-	 *  у прочих BE личности нет, и тег остаётся пустым, как было. Один канал на весь мод, без россыпи. */
-	protected void writeMTEIdentity(net.minecraft.nbt.CompoundTag aNBT) {/* не-MTE потомки личности не несут */}
+	/** MTE identity (registry + sub-id) for the client's chunk packet; non-MTE entities keep an empty tag as before. */
+	protected void writeMTEIdentity(net.minecraft.nbt.CompoundTag aNBT) {/* non-MTE subclasses carry no identity */}
 
-	// ИСТОРИЯ ШВА: getUpdateTag=saveCustomOnly проверялся (4 прогона A/B/C/D) и был отвергнут —
-	// saveCustomOnly на ВСЕХ BE (включая машины) → лишний трафик chunk-пакета и утечка server-полей на клиент.
-	// ВАЖНО (диагностировано): флуд «Block state mismatch … != air, updating» (~9.5k/мир) от getUpdateTag НЕ зависит — он есть
-	// и без него (замер: WD.te привязывает 772k BE, при air=0; блок исчезает ПОЗЖЕ). Корень: GT6-фича сидит в ранней стадии
-	// Decoration.UNDERGROUND_ORES, а поздние стадии (VEGETAL/TOP_LAYER) перестраивают объём и стирают её декор-блоки → orphan-BE.
-	// Отложено в слой вордген-декора/MTE-контента (см. STATE.md). Клиент-синк worldgen-MTE делает целевой механизм:
-	// WORLDGEN_MTE + onChunkWatch/drainPendingSync (GT6WorldgenFeature) — sendClientData тем BE, чей блок РЕАЛЬНО MTE.
+	// getUpdateTag=saveCustomOnly was rejected since it would add chunk-packet traffic and leak server-only fields
+	// for every block entity; the unrelated 'mismatch' log flood comes from decoration overwriting early ore placement.
 
 	/** return the internal Name of this TileEntity to be registered. DO NOT START YOUR NAME WITH "gt."!!! */
 	public abstract String getTileEntityName();
@@ -387,15 +287,8 @@ public abstract class TileEntityBase01Root extends BlockEntity implements ITileE
 	@Override public boolean isServerSide() {return level == null ? net.neoforged.fml.util.thread.EffectiveSide.get().isServer() : !level.isClientSide();}
 	@Override public boolean isClientSide() {return level == null ? net.neoforged.fml.util.thread.EffectiveSide.get().isClient() :  level.isClientSide();}
 	@Override public boolean openGUI(Player aPlayer) {return openGUI(aPlayer, 0);}
-	/**
-	 * F-GUI (шов «GUI/меню», серверный центр): 1.7.10 {@code aPlayer.openGui(mod,id,world,x,y,z)} диспетчерил
-	 * через Forge-{@code IGuiHandler} автоматически — движок его не имеет. Единственная неоцентральная замена —
-	 * {@code Player.openMenu(MenuProvider, Consumer<RegistryFriendlyByteBuf>)}
-	 * (`neo-decompiled/net/minecraft/world/entity/player/Player.java:844`,
-	 * `neoforged/neoforge/common/extensions/IPlayerExtension.java:75-77`), маршрут id→{@code getGUIServer}
-	 * централизован в {@link GT6MenuProvider} (единственная реализация {@code MenuProvider} мода — не плодим).
-	 * Буфер несёт позицию TE + GUIID для клиентской реконструкции контейнера ({@link ContainerCommon#createFromNetwork}).
-	 */
+	/** The old Forge auto-dispatch for GUIs has no neo equivalent; the sole replacement is Player.openMenu(MenuProvider),
+	 *  routed through {@link GT6MenuProvider} as the single MenuProvider implementation for the whole mod. */
 	@Override public boolean openGUI(Player aPlayer, int aID) {
 		if (aPlayer == null) return F;
 		aPlayer.openMenu(new GT6MenuProvider(level, getBlockPos(), aID), aBuf -> {aBuf.writeBlockPos(getBlockPos()); aBuf.writeInt(aID);});
@@ -664,11 +557,8 @@ public abstract class TileEntityBase01Root extends BlockEntity implements ITileE
 		return mIsTicking && mShouldRefresh;
 	}
 	
-	// ⚠️ КАНАЛА В NEO НЕТ ВОВСЕ — 1.7.10 Forge-хук shouldRefresh решал, пересоздавать ли BlockEntity при
-	// смене блока/меты. Сверено: в neoforge-расширениях такого метода нет (0 вхождений), решение о
-	// пересоздании движок принимает сам — BlockEntity живёт, пока новый BlockState его поддерживает
-	// (иначе снимается), а мета в neo — часть BlockState и «смены меты» как отдельного события больше нет.
-	// Восстанавливать нечего; метод оставлен точкой сверки с оригиналом.
+	// neoforge has no equivalent hook at all; the engine itself decides whether to keep a block entity
+	// across a state change, so there is nothing left to restore here.
 	// @Override
 	public boolean shouldRefresh(Block aOldBlock, Block aNewBlock, int aOldMeta, int aNewMeta, Level aWorld, int aX, int aY, int aZ) {
 		return mShouldRefresh || aOldBlock != aNewBlock;
@@ -759,10 +649,8 @@ public abstract class TileEntityBase01Root extends BlockEntity implements ITileE
 		return tTileEntity instanceof ITileEntitySurface ? !((ITileEntitySurface)tTileEntity).isSurfaceOpaque(OPOS[aSide]) : !WD.visOpq(level, getOffsetX(aSide), getOffsetY(aSide), getOffsetZ(aSide), SIDES_VERTICAL[aSide] || WD.border(getBlockPos().getX(), getBlockPos().getZ(), getOffsetX(aSide), getOffsetZ(aSide)), F);
 	}
 	
-	/* F3 superseded-render (GT6BlockModel/ItemModel пайплайн; старый getIcon/immediate-mode мёртв, 0 вызовов neo): было {@code RenderBlocks} (immediate-mode тип, удалён) —
-	 * параметр ретипирован в {@code Object}, как в центральных {@code gregapi.render.IRenderedBlockObject}/
-	 * {@code IRenderedBlockObjectSideCheck} (иначе эти default-реализации не удовлетворяют абстрактные
-	 * методы интерфейсов, и КАЖДЫЙ конкретный MultiTileEntity-класс должен дублировать их сам). */
+	/* RenderBlocks was removed with no replacement type, so the parameter became a neutral Object,
+	   matching the pattern used by the central IRenderedBlockObject interfaces. */
 	public boolean renderItem(Block aBlock, Object aRenderer) {return F;}
 	public boolean renderBlock(Block aBlock, Object aRenderer, BlockGetter aWorld, int aX, int aY, int aZ) {return F;}
 	public boolean usesRenderPass(int aRenderPass, boolean[] aShouldSideBeRendered) {return T;}
@@ -781,12 +669,8 @@ public abstract class TileEntityBase01Root extends BlockEntity implements ITileE
 	
 	public void updateLightValue() {
 		if (this instanceof IMTE_GetLightValue) {
-			// F-light: neo Level.setLightValue/updateLightByType(LightLayer,...) удалены — блок-свет движок
-			// выводит из BlockState getLightEmission через LevelLightEngine, произвольный рантайм-set не поддержан.
-			// Триггерим пересчёт движком: Level.getLightEngine().checkBlock (Level.java:375, LevelLightEngine:32)
-			// для блока и соседей.
-			// F-light ЗАМКНУТ: block-side wiring есть — MultiTileEntityBlock.getLightEmission читает IMTE_GetLightValue
-			// .getLightValue() динамически, поэтому checkBlock пересчитает к per-TE значению (не статич.). Не заглушка.
+			// neo has no direct light-value setter; a recalculation is triggered on the engine instead, which
+			// reads the current value back through getLightEmission on demand.
 			if (level != null) {
 				level.getLightEngine().checkBlock(getBlockPos());
 				for (byte tSide : ALL_SIDES_MIDDLE) level.getLightEngine().checkBlock(new BlockPos(getBlockPos().getX()+OFFX[tSide], getBlockPos().getY()+OFFY[tSide], getBlockPos().getZ()+OFFZ[tSide]));
@@ -831,7 +715,7 @@ public abstract class TileEntityBase01Root extends BlockEntity implements ITileE
 	@Override
 	public byte getComparatorIncoming(byte aSide) {
 		if (level == null) return 0;
-		// F-block: Forge Block.hasComparatorInputOverride()/getComparatorInputOverride(world,x,y,z,side) удалены ->
+		// Forge's comparator-override hooks on Block are gone in neo.
 		// neo BlockState.hasAnalogOutputSignal()/getAnalogOutputSignal(Level,BlockPos,Direction) (BlockBehaviour:628/632).
 		BlockPos tPos = new BlockPos(getOffsetX(aSide), getOffsetY(aSide), getOffsetZ(aSide));
 		net.minecraft.world.level.block.state.BlockState tState = gregapi.util.WD.state(level, tPos);
@@ -844,12 +728,8 @@ public abstract class TileEntityBase01Root extends BlockEntity implements ITileE
 	protected IFluidTank getFluidTankDrainable(byte aSide, FluidStack aFluidToDrain) {return null;}
 	protected IFluidTank[] getFluidTanks(byte aSide) {return ZL_FT;}
 
-	/** MODCOMPAT-001 П2 (F5-capability): те же side-aware танки, что видит внутренний тракт, — наружу, для
-	 *  регистрации {@code Capabilities.Fluid.BLOCK} ({@link gregapi.fluid.GT6FluidCapability}). Отдельный
-	 *  публичный вход, потому что {@link #getFluidTanks(byte)} protected и переопределяется наследниками
-	 *  (в т.ч. ковер-оверрайдом {@code TileEntityBase06Covers:375}) — капа обязана видеть ровно результат
-	 *  этой цепочки, а не свою копию правил. {@code null} = sideless-запрос = {@code SIDE_ANY}, родная
-	 *  GT6-конвенция (та же, что у унаследованных neo-мостов ниже). */
+	/** Public entry point for capability registration, separate from the protected getFluidTanks(byte) that
+	 *  subclasses (including the cover override) can change, so the capability sees the same tanks the logic does. */
 	public final IFluidTank[] getFluidTanksForCapability(Direction aDirection) {return getFluidTanks(UT.Code.side(aDirection));}
 
 	public int fill(Direction aDirection, FluidStack aFluid, boolean aDoFill) {
@@ -899,17 +779,8 @@ public abstract class TileEntityBase01Root extends BlockEntity implements ITileE
 		return rInfo;
 	}
 
-	// F5-capability мост (decisions/F5-fluids.md): neo IFluidHandler (SIDELESS) — концертные методы
-	// поверх GT6-своих side-aware fill/drain/getTankInfo/canFill выше. Оригинал 1.7.10 реализовывал
-	// Forge-sided net.minecraftforge.fluids.IFluidHandler (6 side-методов); порт механически переименовал
-	// import в neo capability IFluidHandler (7 sideless-методов, ИНОЙ контракт — мис-порт). Leaf-TE,
-	// объявляющие `implements IFluidHandler` (MultiTileEntityBasicMachine/AdvancedCraftingTable/PipeFluid/
-	// MultiBlockPart), НАСЛЕДУЮТ эти 7 мостов ОТСЮДА — контракт закрыт ЦЕНТРАЛЬНО, без дублирования и без
-	// смены семантики не-fluid TE (те интерфейс не объявляют, лишних вызовов нет). sideless neo-вызов =
-	// сторона null -> UT.Code.side(null)=SIDE_ANY(6), родная GT6-конвенция «любая сторона». @Override не
-	// ставится намеренно: TE01Root сам IFluidHandler не объявляет — методы удовлетворяют интерфейс leaf-TE
-	// через наследование концертных членов (легальный Java-путь). FluidStack.EMPTY вместо null: neo
-	// IFluidHandler.drain обязан вернуть непустой стек-объект (FluidStack.java, контракт).
+	// Bridges GT6's side-aware fill/drain/getTankInfo above onto neo's sideless IFluidHandler contract;
+	// leaf tile entities inherit these bridges instead of each duplicating the same conversion.
 	public int getTanks() {FluidTankInfo[] t = getTankInfo((Direction)null); return t == null ? 0 : t.length;}
 	public FluidStack getFluidInTank(int aTank) {FluidTankInfo[] t = getTankInfo((Direction)null); return t != null && aTank >= 0 && aTank < t.length && t[aTank] != null && t[aTank].fluid != null ? t[aTank].fluid : FluidStack.EMPTY;}
 	public int getTankCapacity(int aTank) {FluidTankInfo[] t = getTankInfo((Direction)null); return t != null && aTank >= 0 && aTank < t.length && t[aTank] != null ? t[aTank].capacity : 0;}
@@ -922,11 +793,8 @@ public abstract class TileEntityBase01Root extends BlockEntity implements ITileE
 	
 	protected IFluidTank getFluidTankFillable(MultiTileEntityMultiBlockPart aPart, byte aSide, FluidStack aFluidToFill) {return getFluidTankFillable(SIDE_ANY, aFluidToFill);}
 	protected IFluidTank getFluidTankDrainable(MultiTileEntityMultiBlockPart aPart, byte aSide, FluidStack aFluidToDrain) {return getFluidTankDrainable(SIDE_ANY, aFluidToDrain);}
-	/** public, а не protected: через него СТЕНКА многоблока отдаёт наружу танки своего контроллера
-	 *  ({@code IMultiBlockFluidHandler}). В 1.7.10 канала «дай сами танки» не требовалось — часть сама
-	 *  объявляла {@code IFluidHandler}, и чужой мод спрашивал её напрямую; в neo наружу видно только
-	 *  зарегистрированную capability, а та строится из объектов танков ({@code GT6FluidCapability}).
-	 *  Тело и семантика не менялись — часть по-прежнему спрашивает контроллер, контроллер решает сам. */
+	/** public, not protected, since a multiblock wall exposes its controller's tanks through this method
+	 *  to outside callers, who no longer see a raw IFluidHandler directly. */
 	public IFluidTank[] getFluidTanks(MultiTileEntityMultiBlockPart aPart, byte aSide) {return getFluidTanks(SIDE_ANY);}
 	
 	public int fill(MultiTileEntityMultiBlockPart aPart, byte aDirection, FluidStack aFluid, boolean aDoFill) {
@@ -1118,9 +986,7 @@ public abstract class TileEntityBase01Root extends BlockEntity implements ITileE
 	
 	// AE Stuff
 
-	// Э0 (AE2 26.1): @Override снят вместе с implements IMovableTile (см. заголовок класса) — тела методов
-	// Грега 1:1 на месте, doneMoving() переопределён в TileEntityBase02AdjacentTEBuffer:172. Привязка к
-	// движущей механике AE2 26.1 (IBlockEntityMoveStrategy) — этап Э6.
+	// Kept as plain methods with the interface removed; movement compatibility with the current AE2 API is future work.
 	public boolean prepareToMove() {return T;}
 	public void doneMoving() {onCoordinateChange();}
 	
@@ -1269,36 +1135,22 @@ public abstract class TileEntityBase01Root extends BlockEntity implements ITileE
 		return F;
 	}
 	
-	/** F3 superseded-render (GT6BlockModel/ItemModel пайплайн; старый getIcon/immediate-mode мёртв, 0 вызовов neo): было {@code DrawBlockHighlightEvent} (тип удалён, см.
-	 *  {@link gregapi.tileentity.render.ITileEntityOnDrawBlockHighlight} javadoc). */
+	/** Was DrawBlockHighlightEvent (type removed); see the interface's own javadoc for details. */
 	public boolean onDrawBlockHighlight2(ExtractBlockOutlineRenderStateEvent aEvent) {return F;}
 
-	/** F3 superseded-render (GT6BlockModel/ItemModel пайплайн; старый getIcon/immediate-mode мёртв, 0 вызовов neo): новое {@link ExtractBlockOutlineRenderStateEvent} не несёт
-	 *  {@code player}/{@code currentItem}/{@code partialTicks} 1.7.10-события (см. javadoc интерфейса
-	 *  {@link gregapi.tileentity.render.ITileEntityOnDrawBlockHighlight}) — wrench-overlay решение по
-	 *  предмету в руке недостижимо из этого события до BER-пути (decisions/F3-render.md §2.5/§2.7);
-	 *  тело — компилируемая заглушка, сигнатура/структура (делегат в {@code onDrawBlockHighlight2})
-	 *  сохранены. */
+	/** The new event carries neither the player, held item nor partial ticks that the old one did, so
+	 *  the wrench-overlay decision can't be made from here; body is a compiling stub only. */
 	public final boolean onDrawBlockHighlight(ExtractBlockOutlineRenderStateEvent aEvent) {
 		FORCE_FULL_SELECTION_BOXES = F;
-		// 1:1 с оригиналом (TileEntityBase01Root:995-1005): предмет в руке — 1.7.10-событие несло currentItem,
-		// neo-событие не несёт, поэтому игрок берётся у мода.
-		//
-		// BUG-084: игрок берётся ЧЕРЕЗ ЦЕНТР side-разделения (GT_API_Proxy.getThePlayer — сервер отдаёт null,
-		// клиентский прокси Minecraft.getInstance().player), а НЕ прямым обращением к Minecraft. Прежняя строка
-		// звала клиентский класс из ОБЩЕГО кода под пометкой «резолвится лениво, серверная верификация не трогает» —
-		// это неверно: в dev-режиме класс проверяется целиком при трансформации (NeoForgeDevDistCleaner.handlesClass),
-		// и весь TileEntityBase01Root на выделенном сервере не грузился → падал GT_API.<clinit> → мод не стартовал
-		// вовсе. Центр для этого в моде уже был (GT_API_Proxy:230 / GT_API_Proxy_Client:299), здесь он и используется.
+		// The new event has no player field, so it's fetched through the mod's own client/server split (GT_API_Proxy)
+		// instead of calling the client-only Minecraft class directly, which would fail class verification on a dedicated server.
 		byte tSide = (byte)aEvent.getHitResult().getDirection().ordinal();
 		if (!SIDES_VALID[tSide] || onDrawBlockHighlight2(aEvent)) return T;
 		net.minecraft.world.entity.player.Player tPlayer = gregapi.GT_API.api_proxy.getThePlayer();
 		ItemStack tHeld = tPlayer == null ? null : tPlayer.getMainHandItem();
 		if (ST.valid(tHeld) && isUsingWrenchingOverlay(tHeld, tSide)) {
-			// BUG-029: 1:1 с оригиналом (TileEntityBase01Root:999) — при держании ключа/кусачек тонкий коннектор
-			// отдаёт ПОЛНЫЙ бокс и для рамки, и для прицела (getSelectedBoundingBoxFromPool/setBlockBoundsBasedOnState
-			// читают FORCE_FULL_SELECTION_BOXES; блок dynamicShape() → форма живая, флаг действует сразу). Порт эту
-			// строку потерял → коннектор всегда тонкий → рамку невозможно удержать на неподключённом проводе. Восстановлено.
+			// Holding a wrench forces the full selection box even on a thin connector, matching the original;
+			// without it, an unconnected wire's frame becomes impossible to target.
 			FORCE_FULL_SELECTION_BOXES = T;
 			byte tConnections = 0;
 			for (byte i = 0; i < 6; i++) if (isConnectedWrenchingOverlay(tHeld, i)) tConnections |= (byte)(1 << i);

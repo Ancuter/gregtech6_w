@@ -107,7 +107,7 @@ public class GT_Tool_Saw extends ToolStats {
 				ArrayList<ItemStack> tDrops = ((IShearable)aBlock).onSheared(aStack, aPlayer.level(), aX, aY, aZ, aFortune);
 				aDrops.clear();
 				aDrops.addAll(tDrops);
-				/*neo: BlockDropsEvent getDrops() падают всегда; dropChance убран*/;
+				/* neo: BlockDropsEvent getDrops() always falls; dropChance removed */;
 			}
 			WD.set(aPlayer.level(), aX, aY, aZ, NB, 0, 0);
 			return 0;
@@ -116,53 +116,53 @@ public class GT_Tool_Saw extends ToolStats {
 			aDrops.clear();
 			aDrops.add(IL.AETHER_Skyroot_Leaves_Gold.get(1));
 			WD.set(aPlayer.level(), aX, aY, aZ, NB, 0, 3);
-			/*neo: BlockDropsEvent getDrops() падают всегда; dropChance убран*/;
+			/* neo: BlockDropsEvent getDrops() always falls; dropChance removed */;
 			return 0;
 		}
 		if (IL.AETHER_Skyroot_Leaves_Green.equal(aBlock)) {
 			aDrops.clear();
 			aDrops.add(IL.AETHER_Skyroot_Leaves_Green.get(1));
 			WD.set(aPlayer.level(), aX, aY, aZ, NB, 0, 3);
-			/*neo: BlockDropsEvent getDrops() падают всегда; dropChance убран*/;
+			/* neo: BlockDropsEvent getDrops() always falls; dropChance removed */;
 			return 0;
 		}
 		if (IL.AETHER_Skyroot_Leaves_Blue.equal(aBlock)) {
 			aDrops.clear();
 			aDrops.add(IL.AETHER_Skyroot_Leaves_Blue.get(1));
 			WD.set(aPlayer.level(), aX, aY, aZ, NB, 0, 3);
-			/*neo: BlockDropsEvent getDrops() падают всегда; dropChance убран*/;
+			/* neo: BlockDropsEvent getDrops() always falls; dropChance removed */;
 			return 0;
 		}
 		if (IL.AETHER_Skyroot_Leaves_Dark.equal(aBlock)) {
 			aDrops.clear();
 			aDrops.add(IL.AETHER_Skyroot_Leaves_Dark.get(1));
 			WD.set(aPlayer.level(), aX, aY, aZ, NB, 0, 3);
-			/*neo: BlockDropsEvent getDrops() падают всегда; dropChance убран*/;
+			/* neo: BlockDropsEvent getDrops() always falls; dropChance removed */;
 			return 0;
 		}
 		if (IL.AETHER_Skyroot_Leaves_Purple.equal(aBlock)) {
 			aDrops.clear();
 			aDrops.add(IL.AETHER_Skyroot_Leaves_Purple.get(1));
 			WD.set(aPlayer.level(), aX, aY, aZ, NB, 0, 3);
-			/*neo: BlockDropsEvent getDrops() падают всегда; dropChance убран*/;
+			/* neo: BlockDropsEvent getDrops() always falls; dropChance removed */;
 			return 0;
 		}
 		if (IL.AETHER_Skyroot_Leaves_Apple.equal(aBlock)) {
 			aDrops.clear();
 			aDrops.add(IL.AETHER_Skyroot_Leaves_Apple.get(1));
 			WD.set(aPlayer.level(), aX, aY, aZ, NB, 0, 3);
-			/*neo: BlockDropsEvent getDrops() падают всегда; dropChance убран*/;
+			/* neo: BlockDropsEvent getDrops() always falls; dropChance removed */;
 			return 0;
 		}
 		if (aBlock == Blocks.BOOKSHELF) {
 			aDrops.clear();
 			aDrops.add(ST.make(Blocks.BOOKSHELF, 1, 0));
-			/*neo: BlockDropsEvent getDrops() падают всегда; dropChance убран*/;
+			/* neo: BlockDropsEvent getDrops() always falls; dropChance removed */;
 			return 0;
 		}
 		if ((WD.getMaterial(aBlock) == Material.ice || WD.getMaterial(aBlock) == Material.packedIce) && aDrops.isEmpty()) {
 			aDrops.add(ST.make(aBlock, 1, aMetaData));
-			/*neo: BlockDropsEvent getDrops() падают всегда; dropChance убран*/;
+			/* neo: BlockDropsEvent getDrops() always falls; dropChance removed */;
 			return 0;
 		}
 		return 0;

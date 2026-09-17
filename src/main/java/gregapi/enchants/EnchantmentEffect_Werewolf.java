@@ -44,26 +44,9 @@ import net.minecraft.world.phys.Vec3;
 
 import static gregapi.data.CS.RNGSUS;
 
-/**
- * @author Gregorius Techneticies
- *
- * 1:1-перенос игровой логики {@code Enchantment_WerewolfDamage.func_151367_b}
- * (`gregtech6/src/main/java/gregapi/enchants/Enchantment_WerewolfDamage.java:91-111`) — только
- * механизм-носитель сменён: было переопределение виртуального метода vanilla {@code Enchantment},
- * стало record-тело {@code EnchantmentEntityEffect} ({@code neo-decompiled/.../enchantment/effects/
- * EnchantmentEntityEffect.java:13,36}, паттерн эффекта — {@code .../effects/ApplyMobEffect.java:21-56}).
- * Значения (амплитуда {@code bind(1,5,(10*lvl)/7)}, длительность {@code lvl*200}, порог случайного
- * дропа {@code i=-1..<lvl}) не изменены.
- *
- * <p>Замены API 1:1 (движко-шов, не потеря): {@code aHurtEntity.worldObj.isClientSide()} →
- * {@code level().isClientSide()} ({@code Level.java:163}); {@code getCommandSenderName()} →
- * {@code getScoreboardName()} ({@code Entity.java:3200}, у {@code Player} переопределён на имя
- * профиля — {@code Player.java:1760-1763} — тот же семантический контракт: имя для игрока, иначе
- * технический идентификатор); {@code inventory.mainInventory[]} → {@code Inventory.getNonEquipmentItems()}
- * (тот же 36-слотовый хотбар+инвентарь без брони/оффхенда, живая ссылка, не копия — {@code Inventory.java:55,90-92});
- * {@code tEntity.delayBeforeCanPickup=40} → {@code ItemEntity.setPickUpDelay(40)} ({@code ItemEntity.java:439});
- * {@code mainInventory[tSlot]=null} → {@code .set(tSlot, ItemStack.EMPTY)} (тот же слот, тот же живой массив).
- */
+/** @author Gregorius Techneticies
+ *  1:1 transfer of the original effect logic onto the new EnchantmentEntityEffect record mechanism, since
+ *  Enchantment can no longer be subclassed; values, thresholds and API replacements are all 1:1. */
 public record EnchantmentEffect_Werewolf() implements EnchantmentEntityEffect {
 	public static final MapCodec<EnchantmentEffect_Werewolf> CODEC = MapCodec.unit(new EnchantmentEffect_Werewolf());
 

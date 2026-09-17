@@ -61,9 +61,7 @@ public class AdvancedCraftingShaped extends ShapedOreRecipe implements ICrafting
 	public boolean matches(CraftingInput aGrid, Level aWorld) {
 		if (mKeepingNBT) {
 			ItemStack tStack = null;
-			// F11: Forge InventoryCrafting.getSizeInventory()/getStackInSlot(i) удалены; neo-эквивалент —
-			// CraftingInput.size()/getItem(i). getItem(i) никогда не null (пустой слот = ItemStack.EMPTY), поэтому
-			// занятость слота проверяется ST.valid(...), а не сравнением с null (CraftingInput.java:85-96).
+			// Forge's inventory size/slot accessors are gone; occupancy uses ST.valid since an empty slot is never null now.
 			for (int i = 0; i < aGrid.size(); i++) {
 				ItemStack tSlot = aGrid.getItem(i);
 				if (ST.valid(tSlot) && (ItemNBT.get(tSlot) != null)) {
@@ -85,8 +83,7 @@ public class AdvancedCraftingShaped extends ShapedOreRecipe implements ICrafting
 			ST.update(rStack);
 			
 			// Keeping NBT
-			// F11: CraftingInput.size()/getItem(i) (getStackInSlot/getSizeInventory удалены); ST.valid(...)
-			// заменяет "!= null" (getItem(i) всегда non-null, пустой слот = ItemStack.EMPTY).
+			// Same CraftingInput accessors as above; ST.valid replaces the old null check since a slot is never null now.
 			if (mKeepingNBT) for (int i = 0; i < aGrid.size(); i++) {
 				ItemStack tSlot = aGrid.getItem(i);
 				if (ST.valid(tSlot) && (ItemNBT.get(tSlot) != null)) {
@@ -113,8 +110,7 @@ public class AdvancedCraftingShaped extends ShapedOreRecipe implements ICrafting
 			if (mDismantleable) {
 				CompoundTag rNBT = ItemNBT.get(rStack), tNBT = UT.NBT.make();
 				if (rNBT == null) rNBT = UT.NBT.make();
-				// F11 (АДАПТИРОВАНО): 1.7.10 InventoryCrafting фикс-9 (3x3); neo CraftingInput подрезается до габарита
-				// (F11-crafting-recipe.md §7) — Math.min(9,size()) сохраняет 1:1 для полной 3x3 и не переполняется на меньшей. Не заглушка.
+				// The old crafting grid was a fixed 3x3; Math.min(9, size()) keeps that behavior without overrunning a smaller grid.
 				for (int i = 0, j = Math.min(9, aGrid.size()); i < j; i++) {
 					ItemStack tStack = aGrid.getItem(i);
 					if (ST.valid(tStack) && ST.container(tStack, T) == null && !(tStack.getItem() instanceof MultiItemTool)) {

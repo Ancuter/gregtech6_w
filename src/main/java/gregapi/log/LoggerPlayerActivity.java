@@ -39,10 +39,8 @@ import net.neoforged.neoforge.event.level.BlockEvent;
 public class LoggerPlayerActivity implements Runnable {
 	private ArrayList<String> mBufferedPlayerActivity = new ArrayList<>();
 
-	/**
-	 * Поток дневника, который он запоминает сам в run(). Так точка запуска остаётся дословно той же, что в
-	 * оригинале (`new Thread(mPlayerLogger).start()` в GT_API), а прощание всё равно знает, кого будить из сна.
-	 */
+	/** The journal thread remembers itself inside run(), so the start point stays the same call as the original,
+	 *  and shutdown still knows which thread to wake. */
 	private volatile Thread mThread = null;
 
 	public static PrintStream mLog = null;
@@ -52,29 +50,15 @@ public class LoggerPlayerActivity implements Runnable {
 		mLog = aLog;
 	}
 	
-	// F7-event: 1.7.10 единое PlayerInteractEvent + поле action -> neo абстрактная база + суб-события (LeftClickBlock/
-	// RightClickBlock/RightClickItem/…). action восстановлен через instanceof; air-взаимодействия (RightClickItem/
-	// LeftClickEmpty) пропускаются = 1.7.10 RIGHT_CLICK_AIR-skip. Поля: entityPlayer->getEntity, world->getLevel,
-	// x/y/z->getPos(); provider!=null-проверка снята (WorldProvider удалён, дублировала level!=null).
-	// F7-event-bus-hierarchy (документация иерархии событий): если neo-шина не доставляет суб-события подписчику БАЗОВОГО
-	// PlayerInteractEvent — разбить на два @SubscribeEvent (RightClickBlock+LeftClickBlock); лог косметичен.
-	// ⛔ ПОДПИСКА РАЗБИТА ПО КОНКРЕТНЫМ СОБЫТИЯМ — иначе журнала нет вовсе. Развилка, предсказанная
-	// пометкой выше, сбылась: база `PlayerInteractEvent` объявлена абстрактной, а шина такие подписки
-	// запрещает — `addToListeners` бросает IllegalArgumentException «Cannot register listeners for
-	// abstract …» на КАЖДУЮ подписку абстрактным типом. Падало это в конструкторе, на
-	// EVENT_BUS.register(this), и гасилось пустым перехватом у вызывающего (GT_API), поэтому
-	// mPlayerLogger оставался null и журнал активности не работал ни одной строкой.
-	// Набор срабатываний при этом НЕ изменился: прежнее тело само отбирало ровно эти два подсобытия
-	// (instanceof LeftClickBlock / RightClickBlock, остальные -> null -> пропуск), что 1:1 повторяло
-	// правило 1.7.10 «любое действие, кроме RIGHT_CLICK_AIR» при перечне действий
-	// {LEFT_CLICK_BLOCK, RIGHT_CLICK_BLOCK, RIGHT_CLICK_AIR}. Имена действий в строке — те же.
+	// The single 1.7.10 PlayerInteractEvent is split into subclasses in neo, and the abstract base rejects
+	// subscriptions, so the handler is split per concrete sub-event while matching the same click filter.
 	@SubscribeEvent
 	public void onPlayerInteractionLeftClickBlock(PlayerInteractEvent.LeftClickBlock aEvent) {logInteraction(aEvent, "LEFT_CLICK_BLOCK");}
 
 	@SubscribeEvent
 	public void onPlayerInteractionRightClickBlock(PlayerInteractEvent.RightClickBlock aEvent) {logInteraction(aEvent, "RIGHT_CLICK_BLOCK");}
 
-	/** Тело прежнего единого обработчика: одно на оба подсобытия, чтобы строка журнала осталась в одном месте. */
+	/** Body of the former single handler, shared so the logging line stays in one place for both sub-events. */
 	private void logInteraction(PlayerInteractEvent aEvent, String aAction) {
 		if (aEvent.getEntity() != null && aEvent.getLevel() != null && !aEvent.getLevel().isClientSide() && mLog != null) mBufferedPlayerActivity.add(UT.Code.dateAndTime()+";"+aAction+";"+aEvent.getEntity().getName().getString()+";DIM:"+WD.dimensionId(aEvent.getLevel())+";"+aEvent.getPos().getX()+";"+aEvent.getPos().getY()+";"+aEvent.getPos().getZ()+";|;"+aEvent.getPos().getX()/10+";"+aEvent.getPos().getY()/10+";"+aEvent.getPos().getZ()/10);
 	}
@@ -96,10 +80,8 @@ public class LoggerPlayerActivity implements Runnable {
 		} catch(Throwable e) {/**/}}
 	}
 
-	/**
-	 * Слив накопленного в файл. Вынесен из тела цикла, потому что нужен ДВАЖДЫ — в такте работы и в прощании;
-	 * второй копии этих строк быть не должно. Логика внутри дословно та же, что была в цикле у Грегориуса.
-	 */
+	/** Flushing is pulled out of the loop body because it is needed twice, on each tick and on shutdown; there
+	 *  should not be a second copy of this logic. */
 	private void flush(PrintStream aLog) {
 		ArrayList<String> tList = mBufferedPlayerActivity;
 		mBufferedPlayerActivity = new ArrayList<>();
@@ -110,16 +92,8 @@ public class LoggerPlayerActivity implements Runnable {
 		}
 	}
 
-	/**
-	 * ПРОЩАНИЕ С ДНЕВНИКОМ. Зовётся из центра прощания мода (GT_API.onModServerStopped2) — там же, где мод
-	 * прощается со всем остальным, а не отдельным механизмом.
-	 * <p>Порядок важен и обеспечивает требование «дописать и закрыть», а не «оборвать»:
-	 * гасим mLog (ловители событий замолкают ровно по тому же условию, по которому молчали до открытия файла)
-	 * -> будим поток из Thread.sleep(10000) штатным interrupt, иначе выход сервера ждал бы до десяти секунд
-	 * -> дожидаемся, пока он выйдет по СВОЕМУ ЖЕ условию `if (mLog == null) return`
-	 * -> дописываем то, что успело накопиться после его последнего прохода, и закрываем файл.
-	 * Пометить поток служебным (setDaemon) было нельзя: такой поток движок обрывает на полуслове, теряя хвост записи.
-	 */
+	/** Called from the mod's own shutdown hook alongside everything else. Order matters: silence the log flag,
+	 *  wake the sleeping thread with an interrupt, wait for its own exit check, then flush and close the file. */
 	public void stop() {
 		PrintStream tLog = mLog;
 		if (tLog == null) return;

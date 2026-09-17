@@ -28,7 +28,7 @@ import gregapi.item.multiitem.MultiItem;
 import gregapi.item.multiitem.behaviors.IBehavior.AbstractBehaviorDefault;
 import gregapi.util.UT;
 import net.minecraft.world.entity.Entity;
-// F-entity-identity: 1.7.10 EntityZombie.isVillager() -> neo отдельный класс ZombieVillager (ZombieVillager.java:59).
+// 1.7.10's EntityZombie.isVillager() became the separate ZombieVillager class in neo.
 import net.minecraft.world.entity.monster.zombie.ZombieVillager;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -56,14 +56,8 @@ public class Behavior_CureZombie extends AbstractBehaviorDefault {
 				UT.Entities.consumeCurrentItem(aPlayer);
 				if (!tZombie.level().isClientSide()) {
 					int tCureTime = RNGSUS.nextInt(mAverageCureTime * 2) + 500;
-					// F-entity-conversion (ADR: движок централизовал запуск конверсии в приватный ZombieVillager.startConverting).
-					// Оригинал GT6 заводил конверсию через NBT-ключ "ConversionTime" (writeToNBT/readFromNBT) + вручную:
-					// datawatcher-флаг 14 + removePotion(weakness) + addPotion(strength, tCureTime, min(diff-1,0)) + setEntityState(16).
-					// neo: тот же ключ "ConversionTime" читается readAdditionalSaveData (ZombieVillager.java:118-121) -> startConverting,
-					// который ЦЕНТРАЛИЗОВАННО делает ВСЁ ручное (флаг DATA_CONVERTING_ID + removeEffect(WEAKNESS) +
-					// addEffect(STRENGTH, time, min(diff.getId()-1,0)) + broadcastEntityEvent(16), строки 200-207) — ручные строки
-					// СНЯТЫ (движок их поглотил, 1:1 по эффекту, включая тот же min(diff-1,0)-амплитудный расчёт).
-					// save/load через ValueOutput/ValueInput (NBT-рефактор) -> мост TagValueOutput/TagValueInput(CompoundTag).
+					// The engine centralized zombie-villager conversion into startConverting, which now does everything the
+					// original did by hand (flag, potion swap, event) with the same amplifier math; the manual lines are removed.
 					net.minecraft.world.level.storage.TagValueOutput tOut = net.minecraft.world.level.storage.TagValueOutput.createWithContext(net.minecraft.util.ProblemReporter.DISCARDING, tZombie.registryAccess());
 					tZombie.saveWithoutId(tOut);
 					CompoundTag tNBT = tOut.buildResult();

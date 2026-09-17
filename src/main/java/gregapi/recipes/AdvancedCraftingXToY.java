@@ -152,8 +152,7 @@ public class AdvancedCraftingXToY implements ICraftingRecipeGT {
 					}
 				}
 			}
-			// F11 (ADR §7): ветки скана ЧУЖИХ ванильных neo-рецептов (ShapedRecipe/ShapelessRecipe) удалены —
-			// скан/удаление чужих рецептов отложено (в neo их нет на mod-init). Дедуп СВОИХ GT-рецептов — 1:1.
+			// Scanning foreign recipes at mod-init is removed since neo has none there; dedup of GT6's own recipes stays 1:1.
 			
 			if (tCount == mInputCount) {
 				OreDictItemData tData = OM.data(tRecipe.getRecipeOutput());
@@ -167,13 +166,12 @@ public class AdvancedCraftingXToY implements ICraftingRecipeGT {
 	
 	@Override
 	public boolean matches(CraftingInput aGrid, Level aWorld) {
-		// F11: обход-хак Thaumcraft (контейнер крафта рефлексией по 1.7.10-полю) удалён — neo CraftingInput
-		// не несёт контейнер; Thaumcraft — внешний мод (отложено, F10).
+		// The Thaumcraft reflection hack into a 1.7.10 field is removed; neo's grid has no container, and Thaumcraft isn't ported.
 
 		ItemStack tStack = null;
 		OreDictMaterial rMaterial = null;
 		
-		int tInventorySize = aGrid.size(), tCounter = 0; // F11: сетка neo подрезана — семантику под parity (ADR §7)
+		int tInventorySize = aGrid.size(), tCounter = 0; // The neo grid is already trimmed; size check follows that convention for parity.
 		if (tInventorySize < mInputCount) return F;
 		for (int i = 0; i < tInventorySize; i++) {
 			tStack = aGrid.getItem(i);

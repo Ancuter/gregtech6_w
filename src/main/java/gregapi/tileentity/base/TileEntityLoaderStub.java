@@ -33,13 +33,8 @@ import net.minecraft.world.level.storage.ValueInput;
 
 import static gregapi.data.CS.*;
 
-/**
- * F-tileentity-construction (LOAD-путь): concrete-заглушка, которую neo создаёт на world-load для GT6-MTE, чей
- * конкретный класс НЕ выводится из блока (MTE-машины: класс = sub-ID из сохранённого NBT, недоступен в
- * {@code BlockEntityType.create(pos,state)}). Прежний supplier {@code ->null} падал NPE ({@code BlockEntity.loadStatic:206}).
- * Заглушка лишь захватывает сырой NBT в {@link #loadAdditional}; реальный MTE реконструируется через реестр и заменяет
- * заглушку на {@code ChunkEvent.Load} (там доступен {@code Level} + позиция, замена {@code setBlockEntity} безопасна).
- */
+/** A concrete stub neo creates on world-load for GT6 machines whose class comes from saved NBT, unavailable
+ *  to BlockEntityType.create; it only captures raw NBT, and the registry replaces it with the real MTE on ChunkEvent.Load. */
 public class TileEntityLoaderStub extends TileEntityBase01Root {
 	public CompoundTag mLoadedNBT = null;
 
@@ -47,32 +42,27 @@ public class TileEntityLoaderStub extends TileEntityBase01Root {
 
 	@Override public String getTileEntityName() {return "gt.te.loader";}
 
-	// Захват сырого NBT (без прогона readFromNBT — заглушка не знает конкретный класс MTE); реконструкция — на ChunkEvent.Load.
+	// Captures raw NBT without running readFromNBT, since the stub doesn't know the concrete MTE class; reconstruction
+	// happens on ChunkEvent.Load.
 	@Override protected void loadAdditional(ValueInput input) {
 		mLoadedNBT = input.read(MapCodec.assumeMapUnsafe(CompoundTag.CODEC)).orElseGet(UT.NBT::make);
 	}
 
-	/** LOAD-путь БЕЗ ПОТЕРЬ (корень BUG-057): чанк может сохраниться РАНЬШЕ, чем реконструкция стаба добежит
-	 *  (очередь server-tick с квотой; транзитные/граничные чанки выгружаются раньше; при save/shutdown тик не идёт).
-	 *  Базовый {@code saveAdditional} прогонял GT6-мост {@code writeToNBT}, который для стаба писал только id/x/y/z —
-	 *  {@code gt.mte.reg}/{@code gt.mte.id} и все данные MTE стирались с диска НАВСЕГДА (блок навсегда прозрачен).
-	 *  Стаб — прозрачный переносчик: возвращает захваченный NBT на диск ровно как прочитал (идемпотентный round-trip). */
+	/** A chunk can save before the stub's reconstruction catches up, and writing only id/x/y/z through the normal
+	 *  GT6 NBT bridge would erase all MTE data forever; the stub instead round-trips its captured NBT unchanged. */
 	@Override protected void saveAdditional(net.minecraft.world.level.storage.ValueOutput output) {
 		if (mLoadedNBT == null) {super.saveAdditional(output); return;}
 		output.store(mLoadedNBT);
 	}
 
-	/** F6-дедик, ТОТ ЖЕ приём прозрачного переносчика, но в СЕТЬ: чанк уходит игроку тем же тиком, что грузится,
-	 *  а реконструкция стаба отложена на server-tick с квотой — значит в момент сборки пакета в позиции нередко
-	 *  стоит ещё сам стаб, а не настоящий MTE. Личность он несёт (захвачена в mLoadedNBT), и обязан отдать её
-	 *  клиенту, иначе тот получит BE без reg/id и не сможет реконструировать — блок останется прозрачным.
-	 *  Отдаётся ровно личность, не весь захваченный NBT: серверные поля машины клиенту не нужны и не уходят. */
+	/** Same transparent-carrier trick, for the network: a stub often still occupies the position when the chunk
+	 *  packet is built, so it must forward the identity it captured, or the client can never reconstruct the real MTE. */
 	@Override protected void writeMTEIdentity(CompoundTag aNBT) {
 		if (mLoadedNBT == null) return;
 		if (mLoadedNBT.contains(NBT_MTE_REG)) aNBT.putShort(NBT_MTE_REG, mLoadedNBT.getShort(NBT_MTE_REG).orElse((short)0));
 		if (mLoadedNBT.contains(NBT_MTE_ID )) aNBT.putShort(NBT_MTE_ID , mLoadedNBT.getShort(NBT_MTE_ID ).orElse((short)0));
-		// Имя реестра: из захваченного NBT, если мир уже писался с ним; иначе выводим из числа ЗДЕСЬ, на сервере,
-		// где это число ещё осмысленно — клиенту оно бесполезно (у него своя нумерация предметов).
+		// Registry name comes from captured NBT if present, else derived from the number here on the server, since the client
+		// has its own separate item numbering.
 		String tName = mLoadedNBT.getString(NBT_MTE_REGNAME).orElse("");
 		if (!tName.isEmpty()) aNBT.putString(NBT_MTE_REGNAME, tName);
 		else if (mLoadedNBT.contains(NBT_MTE_REG)) gregapi.block.multitileentity.MultiTileEntityRegistry.writeRegistryName(aNBT, mLoadedNBT.getShort(NBT_MTE_REG).orElse((short)0));

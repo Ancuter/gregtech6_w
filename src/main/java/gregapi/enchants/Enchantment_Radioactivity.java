@@ -29,24 +29,9 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.enchantment.Enchantment;
 
-/**
- * @author Gregorius Techneticies
- *
- * <p>Форс движка, см. {@link Enchantment_WerewolfDamage}. Игровая логика (делегат в
- * {@code UT.Entities.applyRadioactivity}) перенесена 1:1 в {@link EnchantmentEffect_Radioactivity};
- * bootstrap — {@link EnchantsGT6#bootstrap}.
- *
- * <p>Оригинал (`gregtech6/.../Enchantment_Radioactivity.java:58-81`) переопределял
- * {@code getMinEnchantability=Integer.MAX_VALUE}/{@code getMaxEnchantability=0} (никогда не
- * достижим через стол зачарования) и {@code canApply=false}/{@code isAllowedOnBooks=false} —
- * в data-driven модели это переносится как {@code EnchantmentDefinition} с
- * {@code Enchantment.constantCost(Integer.MAX_VALUE)}/{@code constantCost(0)} (те же литералы,
- * `EnchantsGT6.bootstrap`) и ОТСУТСТВИЕМ членства в теге {@code EnchantmentTags.IN_ENCHANTING_TABLE}
- * (не добавляется нигде в этой зоне) — функционально тот же результат «никогда не выпадает».
- *
- * F8 (1:1): материал→чара назначения (golden ctor addEnchantmentForTools(this,N)) ПЕРЕНЕСЕНЫ в MT.init() enchant-блок
- * как addEnchantmentForTools(KEY,N). Материалы (уран/плутоний/…) снова несут Radioactivity. Не заглушка.
- */
+/** @author Gregorius Techneticies
+ *  Engine-forced split, see {@link Enchantment_WerewolfDamage}; game logic moved 1:1 into
+ *  {@link EnchantmentEffect_Radioactivity}, with material assignments moved into MT.init() intact. */
 public class Enchantment_Radioactivity {
 	public static final ResourceKey<Enchantment> KEY =
 		ResourceKey.create(Registries.ENCHANTMENT, Identifier.fromNamespaceAndPath(MD.GAPI.mID, "radioactivity"));

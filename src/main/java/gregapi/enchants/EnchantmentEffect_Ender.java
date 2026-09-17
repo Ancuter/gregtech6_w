@@ -35,15 +35,9 @@ import net.minecraft.world.item.enchantment.EnchantedItemInUse;
 import net.minecraft.world.item.enchantment.effects.EnchantmentEntityEffect;
 import net.minecraft.world.phys.Vec3;
 
-/**
- * @author Gregorius Techneticies
- *
- * 1:1-перенос игровой логики {@code Enchantment_EnderDamage.func_151367_b}
- * (`gregtech6/src/main/java/gregapi/enchants/Enchantment_EnderDamage.java:82-89`) — только
- * механизм-носитель сменён, см. {@link EnchantmentEffect_Werewolf}. Значения (Weakness+Poison,
- * амплитуда {@code bind(1,5,(5*lvl)/7)}, длительность {@code lvl*200}) не изменены; комментарии
- * оригинала (Weakness мешает телепорту эндермена; Poison облегчает убийство дракона) сохранены.
- */
+/** @author Gregorius Techneticies
+ *  1:1 transfer of the original enchantment effect logic; only the carrying mechanism changed, see
+ *  {@link EnchantmentEffect_Werewolf} for why. Values and durations are unchanged. */
 public record EnchantmentEffect_Ender() implements EnchantmentEntityEffect {
 	public static final MapCodec<EnchantmentEffect_Ender> CODEC = MapCodec.unit(new EnchantmentEffect_Ender());
 

@@ -26,19 +26,8 @@ package gregapi.fluid;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.IFluidTank;
 
-/**
- * F5 компат-заглушка: Forge-1.7.10 {@code net.minecraftforge.fluids.FluidTankInfo} — простая
- * неизменяемая пара (жидкость, ёмкость), которую отдавал {@code IFluidHandler.getTankInfo()}. В neo
- * 26.1.2 прямого аналога нет (заменено transfer-API {@code ResourceHandler}, не возвращающим такую
- * пару напрямую) — воспроизведена по фактическому использованию в дереве (2-арг конструктор,
- * поля {@code fluid}/{@code capacity}: {@code gregapi.data.CS.java:834}, {@code FluidTankGT.getInfo()}).
- * [Метка отложенности «consumer-файлы не мигрированы» СНЯТА 2026-08-06 — пережила собственный фикс:
- * в оригинале ровно 14 вызывателей {@code getTankInfo}, в порте у всех 14 есть плечо — 12 ходят через
- * ЦЕНТР шва {@code FL.getTankInfo} ({@code FL.java:944}, side-aware поверх neo-API), сенсоры
- * Fluidometer/Bucketometer/KiloBucketometer, BasicMachine:705, WD:2061, Bridge/Extender/MiniPortal/
- * LongDistancePipelineFluid; 1 — контракт {@code IMultiBlockFluidHandler} (1:1 с оригиналом :396);
- * 1 — {@code MultiTileEntityPipeFluid:506-511}, длина берётся из neo-API напрямую (документировано там).]
- */
+/** Compat stand-in for Forge 1.7.10's simple immutable (fluid, capacity) pair, which neo's transfer API
+ *  does not return directly; reconstructed from how the mod actually uses it (a 2-arg constructor). */
 public final class FluidTankInfo {
 	public final FluidStack fluid;
 	public final int capacity;
@@ -48,8 +37,7 @@ public final class FluidTankInfo {
 		capacity = aCapacity;
 	}
 
-	/** Forge-1.7.10 {@code FluidTankInfo(IFluidTank)} = пара (текущая жидкость, ёмкость бака).
-	 *  neo IFluidTank сохранил {@code getFluid()}/{@code getCapacity()} — 1:1. */
+	/** neo's IFluidTank kept getFluid()/getCapacity(), so this constructor carries over 1:1. */
 	public FluidTankInfo(IFluidTank aTank) {
 		this(aTank.getFluid(), aTank.getCapacity());
 	}

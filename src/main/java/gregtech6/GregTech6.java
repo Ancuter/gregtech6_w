@@ -31,32 +31,10 @@ import net.neoforged.fml.common.Mod;
 import gregapi.network.NetworkHandler;
 import org.slf4j.Logger;
 
-/**
- * Точка входа мода с modId {@code "gregtech6"} — совпадает с объявленным в
- * {@code src/main/templates/META-INF/neoforge.mods.toml} ({@code ${mod_id}}) и используется тестом
- * {@code gregtech6.SanityTest} (обращается к {@link #MODID}). Поэтому класс СОХРАНЁН.
- *
- * <p><b>F12/R3.</b> ADR {@code decisions/F12-registration-lifecycle.md:79} предписывает удалить этот
- * временный toolchain-bring-up-скелет, раз реальным neo-{@code @Mod} стал {@code gregapi.GT_API}.
- * Однако полное удаление класса сломало бы mod-точку-входа (declared modId {@code gregtech6} в
- * mods.toml) и компиляцию {@code SanityTest}. Поэтому применён вариант ADR «оставить класс, но убрать
- * из него регистрацию в обход центра»: удалены собственные {@code DeferredRegister.Blocks/Items},
- * тестовые {@code TEST_BLOCK}/{@code TEST_BLOCK_ITEM} и тестовый {@code CreativeModeTab} — это был
- * артефакт проверки сборки, не из архитектуры Грегориуса.</p>
- *
- * <p><b>Централизация (F12).</b> Регистрация контента теперь идёт ТОЛЬКО через центры:
- * {@code gregapi.GT_API} (Item/Block, F12) и {@code gregapi.fluid.FluidGT} (Fluid, F5). Здесь ничего
- * не регистрируется. Единственная оставшаяся привязка к мод-шине — подписка neo-payload'ов сети
- * (F7, {@code NetworkHandler::registerPayloadHandlers}), это не R3-регистрация контента.</p>
- *
- * <p>Осиротевший ассет {@code block.gregtech6.test_block} в
- * {@code assets/gregtech6/lang/en_us.json} остаётся безвредным (неиспользуемый ключ локализации);
- * ресурсы — вне scope F12-кода.</p>
- */
-// F12 mod-структура (boot работает): временный @Mod-носитель modId gregtech6; удалить, когда
-// GT6_Main станет реальным @Mod(GT) — decisions/F12-registration-lifecycle.md §4. Причина отложенности:
-// neoforge.mods.toml требует живой entrypoint УЖЕ на этапе сборки, а законный владелец modId (мод GT,
-// GT6_Main) переводится на neo-@Mod только в порту контента (контент-824, отложен по §4.1).
+/** Kept only because the declared modId ("gregtech6") needs a live entry point and SanityTest references MODID.
+ *  All Item/Block/Fluid registration now goes through the centers GT_API and FluidGT; nothing registers here. */
+// Temporary @Mod carrier for modId gregtech6, removed once GT6_Main becomes the real @Mod(GT).
+// neoforge.mods.toml needs a live entrypoint already at build time, before content registration moves there.
 @Mod(GregTech6.MODID)
 public class GregTech6 {
     public static final String MODID = "gregtech6";
@@ -64,7 +42,7 @@ public class GregTech6 {
     public static final Logger LOGGER = LogUtils.getLogger();
 
     public GregTech6(IEventBus modEventBus) {
-        // F7 (сеть): регистрация neo-payload'ов — не R3-регистрация контента, оставлена как есть.
+        // Network payload registration isn't content registration, so it's left as-is here.
         modEventBus.addListener(NetworkHandler::registerPayloadHandlers);
         LOGGER.info("[GregTech6] entrypoint loaded — content registration centralised in GT_API (F12) / FluidGT (F5)");
     }

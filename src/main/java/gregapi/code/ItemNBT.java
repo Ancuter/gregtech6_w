@@ -28,35 +28,9 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
 
-/**
- * F8 — центральный мост ItemStack↔NBT (см. `decisions/F8-nbt-data-components.md`,
- * `REMAP-RULES.md` §C3). В 1.7.10 "предметный NBT" был сырым mutable-полем `NBTTagCompound`
- * прямо на `ItemStack` (`getTagCompound`/`setTagCompound`/`hasTagCompound`). В neo 26.1.2 этих
- * методов больше нет — канал заменён на `DataComponents.CUSTOM_DATA` (обёртка `CustomData`,
- * см. `neo-decompiled/net/minecraft/world/item/component/CustomData.java`).
- * <p>
- * Этот класс воспроизводит старую 1.7.10-семантику 1:1 поверх нового канала:
- * <ul>
- *   <li>{@link #get(ItemStack)} == старое `ItemNBT.get(stack)` (null, если тега нет).</li>
- *   <li>{@link #set(ItemStack, CompoundTag)} == старое `stack.setTagCompound(nbt)`.</li>
- *   <li>{@link #has(ItemStack)} == старое `(ItemNBT.get(stack) != null)`.</li>
- * </ul>
- * <p>
- * ВАЖНО — КОНТРАКТ «мутировал → закоммить»: `CustomData` внутри иммутабельна (каждый `get`/
- * `copyTag` отдаёт КОПИЮ) — в отличие от оригинала 1.7.10, где возвращённый тег был тем же самым
- * объектом, что хранился в стеке (прямая мутация без повторного `setTagCompound` там сохранялась).
- * Любой код, который мутирует тег, полученный из {@link #get(ItemStack)} (или из транзитивных
- * обёрток `UT.NBT.get`/`getNBT`/`getOrCreate`), ОБЯЗАН записать его обратно через
- * {@link #set(ItemStack, CompoundTag)} / `UT.NBT.set` — иначе изменение потеряется. Это относится
- * и к геттероподобным именам: `getOrCreate` тоже возвращает DETACHED-копию.
- * <p>
- * Известные точки, где повторная запись логически невозможна без смены контракта вызывающего
- * (ЗАКРЫТЫ write-back ItemNBT.set — см. память gt6-stub-drops-data-lesson; заметка историческая): `MultiItemTool.setToolDamage`/`isItemStackUsable`,
- * `Behavior_Sonictron.setCurrentIndex`/`setTickTimer` — они возвращают мутируемый тег наружу, а
- * вызывающий его не коммитит. Разбор — `decisions/F8-nbt-data-components.md` §7.
- *
- * @author Gregorius Techneticies
- */
+/** @author Gregorius Techneticies
+ *  Central ItemStack<->NBT bridge: the old mutable stack-level tag is now immutable DataComponents.CUSTOM_DATA,
+ *  so code that mutates a tag from {@link #get(ItemStack)} must write it back via {@link #set} or lose it. */
 public final class ItemNBT {
 	private ItemNBT() {/**/}
 

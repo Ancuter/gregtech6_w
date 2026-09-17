@@ -29,27 +29,9 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.enchantment.Enchantment;
 
-/**
- * @author Gregorius Techneticies
- *
- * <p>Форс движка: {@code net.minecraft.world.item.enchantment.Enchantment} в neo — {@code record}
- * (final, не наследуется, {@code neo-decompiled/.../enchantment/Enchantment.java:60}); прежние
- * {@code extends net.minecraft.enchantment.EnchantmentDamage} и переопределение виртуального
- * {@code func_151367_b} физически невозможны (движок больше не диспетчерит зачарования через
- * override-колбэки — см. `DEFERRED-LEDGER.md` метку {@code ENCHANT, effect-dispatch-engine}).
- * Игровая логика (проверка {@code isWereCreature} + 2 зелья + пасхалка Bear989Sr) перенесена 1:1
- * в {@link EnchantmentEffect_Werewolf}; полная сборка объекта чара (definition/cost/slots/эффект)
- * и запись в датапак-реестр {@code Registries.ENCHANTMENT} — {@link EnchantsGT6#bootstrap}.
- *
- * <p>{@link #KEY} — стабильная modern-идентичность этого чара (заменяет прежний
- * {@code public static Enchantment_WerewolfDamage INSTANCE}, который держал сам Java-объект чара;
- * в data-driven модели чар — не Java-объект, а запись реестра, адресуемая {@code ResourceKey}).
- *
- * F8 (1:1): прежние вызовы {@code MT.Ir.addEnchantmentForDamage(this, 6)} и далее по всем материалам ПЕРЕНЕСЕНЫ
- * в {@code MT.init()} (enchant-блок) как {@code Ir.addEnchantmentForDamage(KEY, 6)}. Тайминг НЕ мешает: список хранит
- * {@code ResourceKey} (не резолвнутый Holder), разрешаемый лишь при применении чара (позже RegistryAccess готов).
- * Материалы (Ir/Osmiridium/HSSS/Ag/…) снова несут Werebane. Не заглушка.
- */
+/** @author Gregorius Techneticies
+ *  Enchantment is a final record in neo and can no longer be subclassed, so the original logic moved 1:1
+ *  into {@link EnchantmentEffect_Werewolf}; {@link #KEY} replaces the old singleton as its stable identity. */
 public class Enchantment_WerewolfDamage {
 	public static final ResourceKey<Enchantment> KEY =
 		ResourceKey.create(Registries.ENCHANTMENT, Identifier.fromNamespaceAndPath(MD.GAPI.mID, "werebane"));

@@ -33,21 +33,16 @@ import net.minecraft.client.renderer.state.level.CameraRenderState;
 
 import static gregapi.data.CS.*;
 
-/**
- * BUG-092 (дедикейт: «нет камней и палок»): спец-рендер масс-хранилища ВЫНЕСЕН из common-класса
- * {@link MultiTileEntityMassStorage} — тот же класс дефекта и тот же приём, что {@link MTEChestRenderer}
- * (клиентские типы в common-MTE валили линковку класса на выделенном сервере и обрывали
- * Loader_MultiTileEntities; в 1.7.10 члены вырезал @SideOnly). Содержимое — 1:1 перенос.
- */
+/** Mass-storage's special renderer is pulled out for the same reason and technique as {@link MTEChestRenderer}. */
 public class MTEMassStorageRenderer implements BlockEntityRenderer<MultiTileEntityMassStorage, MTEMassStorageRenderer.MTEMassStorageRenderState> {
 	public static MTEMassStorageRenderer INSTANCE = new MTEMassStorageRenderer();
 
-	/** Мост {@code MultiTileEntityMassStorage.onRegistrationFirstClient} (клиент-only вызов). */
+	/** Bridge for the client-only onRegistrationFirstClient call. */
 	public static void bindFirst(Class<?> aClass) {
 		MultiTileEntityBER.bindSpecialRenderer(aClass, INSTANCE);
 	}
 
-	/** Состояние кадра спец-рендера (extract на main-thread, submit только читает). */
+	/** Per-frame render state, extracted on the main thread; submit only reads it. */
 	public static class MTEMassStorageRenderState extends BlockEntityRenderState {
 		public net.minecraft.client.renderer.item.ItemStackRenderState mItem; public byte mStorageFacing;
 	}
@@ -62,9 +57,8 @@ public class MTEMassStorageRenderer implements BlockEntityRenderer<MultiTileEnti
 		BlockEntityRenderer.super.extractRenderState(aStorage, aState, aPartialTick, aCameraPos, aBreakProgress);
 		aState.mItem = null;
 		if (!aStorage.slotHas(1) || !aStorage.isFaceVisible()) return;
-		aState.mStorageFacing = aStorage.mFacing; // BUG-078: для item-формы facing уже подставлен центром applyItemFacing // BUG-038: item-форма (detached-TE) — калибруемый facing предмет-дисплея
-		// BUG-015 v2: GUI-контекст (не FIXED) = ИНВЕНТАРНАЯ иконка — носитель 1.7.10 renderItemIntoGUI-формы
-		// (блоки изометрией «как в JEI/креативе» — репорт игрока: «иконка ресурса не такая, как в JEI»)
+		aState.mStorageFacing = aStorage.mFacing; // For item-form, facing is already set by the central applyItemFacing that calibrates the display item's orientation.
+		// GUI display context (not FIXED) uses the inventory icon transform, matching 1.7.10's JEI/creative look.
 		aState.mItem = new net.minecraft.client.renderer.item.ItemStackRenderState();
 		net.minecraft.client.Minecraft.getInstance().getItemModelResolver().updateForTopItem(aState.mItem, aStorage.slot(1), net.minecraft.world.item.ItemDisplayContext.GUI, aStorage.getLevel(), null, 0);
 	}
@@ -73,65 +67,23 @@ public class MTEMassStorageRenderer implements BlockEntityRenderer<MultiTileEnti
 	public void submit(MTEMassStorageRenderState aState, PoseStack aPoseStack, SubmitNodeCollector aNodes, CameraRenderState aCamera) {
 		if (aState.mItem == null) return;
 		byte tFacing = aState.mStorageFacing;
-		// BUG-015: 1.7.10 рисовал GUI-предмет ОТ УГЛА (renderItemIntoGUI от (0,0), 16px * 1/32 = 0.5 блока),
-		// поэтому точка трансляции была сдвинута на −0.25 вбок и стояла на верхнем краю (Y=0.625) — чтобы ЦЕНТР
-		// предмета попал в (центр грани, Y=0.375). Neo ItemStackRenderState/FIXED рисует модель ЦЕНТРИРОВАННОЙ —
-		// дословный перенос углового сдвига смещал предмет на четверть блока вбок и вверх (репорт игрока
-		// «изображение предмета не в центре, а сбоку»). Транслируем сразу в ЦЕНТР предмета 1.7.10.
+		// 1.7.10 drew the GUI item from its corner, so the translation point was offset to compensate; neo's FIXED
+		// context draws the model already centered, so translating straight to that same 1.7.10 center point is needed instead.
 		aPoseStack.pushPose();
 		aPoseStack.translate(0.5 + OFFX[tFacing]*0.502, 0.375, 0.5 + OFFZ[tFacing]*0.502);
-		// BUG-015 v4: rotZ(180) из 1.7.10 компенсировал y-вниз-ориентацию GUI-рендера (renderItemIntoGUI рисовал
-		// текстуру сверху-вниз); neo-модель уже y-вверх — дословный перенос переворачивал иконку вверх ногами.
-		// ПОВОРОТ ЛИЦОМ НАРУЖУ. Содержимое рисуется в контексте GUI, а там модель обращена лицом к камере,
-		// то есть в +Z (у ItemTransforms.GUI плоского предмета поворота нет вовсе). Значит нужен угол,
-		// переводящий +Z в сторону грани: north 180°, south 0°, west 270°, east 90° — это `-toYRot()`.
-		//
-		// Прежняя формула `COMPASS_FROM_SIDE[tFacing]*90` = {north 0, south 180, west 270, east 90}: запад и
-		// восток совпадали, а СЕВЕР и ЮГ были развёрнуты ИЗНАНКОЙ — плоская пластина показывала зеркальную
-		// цифру, блок не ту сторону (скриншоты игрока 2026-08-09). Отсюда вся история BUG-075: общий доворот
-		// 180° чинил север с югом и ровно так же ломал запад с востоком, поэтому симптом «переезжал».
-		// Канон рамки (`180 - toYRot`, ItemFrameRenderer:57-62) сюда НЕ подходит: рамка рисует в контексте
-		// FIXED с иной базовой ориентацией — проверено живьём, зеркальность осталась на всех гранях.
-		// Вертикальные грани: наклон -90*step по X, как у рамки.
+		// 1.7.10's y-down GUI render needed a compensating 180-degree Z rotation that neo's y-up model doesn't; the
+		// correct per-side angle from +Z to the display face is -toYRot(), not the old formula that mirrored north/south.
 		net.minecraft.core.Direction tDir = net.minecraft.core.Direction.from3DDataValue(tFacing);
 		if (tDir.getAxis().isHorizontal()) {
 			aPoseStack.mulPose(com.mojang.math.Axis.YP.rotationDegrees(-tDir.toYRot()));
 		} else {
 			aPoseStack.mulPose(com.mojang.math.Axis.XP.rotationDegrees(-90 * tDir.getAxisDirection().getStep()));
 		}
-		// BUG-075. Витрина показывает GUI-ФОРМУ содержимого, а её оба движка строят по-разному, причём
-		// ПО-РАЗНОМУ ДЛЯ БЛОКА И ДЛЯ ПЛОСКОГО ПРЕДМЕТА. Факты 1.7.10 (внешняя цепочка витрины :723-729 и
-		// RenderItem.renderItemIntoGUI):
-		//   внешняя витрина        : glRotatef(180,Z) · glRotatef(compass*90,Y) · glScalef(1/32, 1/32, -0.0001)
-		//   ветка 3D-блока (:36-38,49): glScalef(1,1,-1) · glRotatef(210,X) · glRotatef(45,Y) · glRotatef(-90,Y)
-		//   ветка спрайта  (renderIcon): ни зеркала, ни поворотов — иконка 16x16 в экранной плоскости
-		// Отсюда в оригинале: у БЛОКА внешнее зеркало по Z гасилось внутренним (два минуса), у ПЛОСКОГО
-		// предмета внутреннего зеркала не было и он оставался ЗЕРКАЛЬНЫМ по Z.
-		//
-		// Порт потерял знак: стояло +0.0001 для обоих. У блоков это случайно совпало с оригиналом, у
-		// предметов дало расхождение — репорт игрока 2026-07-28: «предметы отражены».
-		// Знак восстановлен 1:1 и ровно там, где он был в оригинале, — только для плоских моделей.
-		//
-		// Признак блочности берётся у самой модели: usesBlockLight = gui_light "side"
-		// (ModelRenderProperties:16 — getTopGuiLight().lightLikeBlock()), а НЕ instanceof BlockItem:
-		// у факела, рельсов и растений модель плоская, и вести себя они должны как предметы.
-		// ⛔ Ветка «зеркало по Z для плоских» СНЯТА как бездействующая: отражение вдоль оси взгляда не меняет
-		// проекцию на экран (координаты x,y сохраняются), у сплющенной до 0.0001 модели это тождество.
-		// Живая проверка игроком: знак Z вернули — «изменений не вижу, предметы так же отражены».
-		//
-		// Источник отражения — снятый в BUG-015 v4 (d502c870) поворот `glRotatef(180, 0,0,1)`. Вокруг Z он
-		// разворачивает картинку в её же плоскости, то есть отражает СРАЗУ ПО ДВУМ осям — и по Y, и по X.
-		// Снимали его по причине, относящейся только к Y («в 1.7.10 компенсировал y-вниз GUI-рендера, neo-модель
-		// уже y-вверх» — верно, вертикаль после этого стала правильной), но вместе с Y ушло и отражение по X.
-		// Горизонталь осталась зеркальной и всплыла позже, на несимметричных иконках.
-		//
-		// Возвращаем недостающую половину как ПОВОРОТ вокруг Y на 180°, а не как scale(-1,1,1): для плоской
-		// модели это та же зеркальность по горизонтали, но поворот не меняет хиральность и не ломает
-		// отбраковку граней. Блочной модели тот же доворот нужен по замеру игрока («блоки перевёрнуты на 180»),
-		// поэтому ветки не разделяются — величина одна на всю витрину и калибруется одним числом.
+		// 1.7.10's external display chain mirrored blocks and flat items differently along Z; the port dropped that sign
+		// for flat items only, mirroring icons; it's restored as a Y-axis rotation, not a scale flip, so winding stays intact.
 		if (MASSSTORAGE_DISPLAY_YAW != 0) aPoseStack.mulPose(com.mojang.math.Axis.YP.rotationDegrees(MASSSTORAGE_DISPLAY_YAW));
 		aPoseStack.scale(0.5f, 0.5f, 0.0001f);
-		aState.mItem.submit(aPoseStack, aNodes, 0xF000F0 /* fullbright 240/240, ориг setLightmapTextureCoords */, net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY, 0);
+		aState.mItem.submit(aPoseStack, aNodes, 0xF000F0 /* fullbright 240/240, matching the original setLightmapTextureCoords. */, net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY, 0);
 		aPoseStack.popPose();
 	}
 }

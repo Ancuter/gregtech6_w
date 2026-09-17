@@ -30,25 +30,11 @@ import java.util.Collection;
 
 import static gregapi.data.CS.RES_PATH_MODEL;
 
-/**
- * F3 superseded-render (GT6BlockModel/ItemModel пайплайн; старый getIcon/immediate-mode мёртв, 0 вызовов neo): 1.7.10 {@code RenderPlayer} (immediate-mode: GL11 push/pop-матрицы,
- * ручная интерполяция позиции игрока по SRG-полям {@code field_71091_bM}.., {@code ModelBiped.renderCloak})
- * — весь этот стек удалён в 26.1.2 (decisions/F3-render.md §1). Класс больше не наследует движковый
- * рендерер игрока (тип удалён без замены с той же формой) — держит только чистую бизнес-логику выбора
- * плаща по нику/UUID ({@link #getResource(String)}, БЕЗ ИЗМЕНЕНИЙ). Хук ретипирован на neo-эквивалент
- * {@code RenderPlayerEvent.Pre} (1:1 замена старого {@code RenderPlayerEvent.Specials.Pre}).
- * [Метка отложенности «заглушка хука» СНЯТА 2026-08-06.] Тело оригинала (:69-111) копировало ванильную
- * геометрию плаща руками (immediate-mode, мёртв) — в neo та же функция выражается ДАННЫМИ: подмена
- * {@code AvatarRenderState.skin} (public-поле стейта, пересобирается каждый кадр) на копию с GT6-плащом,
- * рисует сам движковый {@code CapeLayer.submit:44-68}. Условия оригинала несёт движок 1:1: невидимость —
- * {@code !state.isInvisible} (CapeLayer:45), настройка «скрыть плащ» ({@code getHideCape()} оригинала) —
- * {@code state.showCape} (CapeLayer:45); фолбэк выбора по UUID — как оригинал :78. Отличие, осознанное:
- * оригинал рисовал GT6-плащ ПОВЕРХ Mojang-плаща (два слоя друг на друге со сдвигом 0.125) — здесь
- * Mojang-плащ не перекрывается (свой плащ у игрока побеждает GT6-шный), двойного рисования нет.
- */
+/** The old immediate-mode player renderer is gone in 26.1.2; this class now holds only cape-selection logic.
+ *  The cape is drawn by swapping AvatarRenderState.skin via the engine's own CapeLayer, hooked to RenderPlayerEvent.Pre. */
 public class PlayerModelRenderer {
-	// neo Identifier.assertValidPath запрещает заглавные в path (1.7.10 ResourceLocation их допускал) — имена
-	// плащей-текстур приведены к lowercase (файлы переименованы синхронно). Порядок/логика выбора плаща 1:1.
+	// neo's Identifier.assertValidPath forbids uppercase paths, so cape texture filenames are lowercased.
+	// Files renamed to match; selection order and logic are unchanged.
 	private final Identifier[] mResources = new Identifier[] {Identifier.parse(RES_PATH_MODEL + "braintech.png"), Identifier.parse(RES_PATH_MODEL + "silver.png"), Identifier.parse(RES_PATH_MODEL + "mrbrain.png"), Identifier.parse(RES_PATH_MODEL + "dev.png"), Identifier.parse(RES_PATH_MODEL + "gold.png"), Identifier.parse(RES_PATH_MODEL + "crazy.png"), Identifier.parse(RES_PATH_MODEL + "sus.png")};
 	private final Collection<String> mSupporterListSilver, mSupporterListGold;
 
@@ -79,8 +65,8 @@ public class PlayerModelRenderer {
 		return null;
 	}
 
-	/** Плащ GT6 — данными движковому слою (разбор в class javadoc): свой выбор текстуры + ванильный
-	 *  {@code CapeLayer}. Имя игрока — по entity id из стейта (в {@code AvatarRenderState} ника нет). */
+	/** GT6's cape layers onto the engine via data, not code: only the texture choice is ours.
+	 *  Player identity comes from the entity id in the render state, since the state carries no nickname. */
 	public void receiveRenderSpecialsEvent(RenderPlayerEvent.Pre<?> aEvent) {
 		try {
 			net.minecraft.client.renderer.entity.state.AvatarRenderState tState = aEvent.getRenderState();
@@ -88,12 +74,12 @@ public class PlayerModelRenderer {
 			net.minecraft.client.multiplayer.ClientLevel tLevel = net.minecraft.client.Minecraft.getInstance().level;
 			if (tLevel == null) return;
 			if (!(tLevel.getEntity(tState.id) instanceof net.minecraft.world.entity.player.Player tPlayer)) return;
-			// имя — getScoreboardName(): у Player это имя профиля (приём проекта, EnchantmentEffect_Werewolf:56)
+			// Name comes from getScoreboardName(): for a Player entity, that's the profile name.
 			Identifier tCape = getResource(tPlayer.getScoreboardName());
 			if (tCape == null) tCape = getResource(tPlayer.getUUID().toString());
 			if (tCape == null) return;
-			// ResourceTexture(id, texturePath) — 2-арг конструктор, путь прямой (без авто-«textures/…png»):
-			// mResources уже несут полный путь вида gregtech:textures/model/<имя>.png (ClientAsset.java:19-27).
+			// ResourceTexture(id, texturePath) is the 2-arg constructor with a direct path (no auto "textures/…png");
+			// mResources already carry the full path, e.g. gregtech:textures/model/<name>.png.
 			tState.skin = net.minecraft.world.entity.player.PlayerSkin.insecure(
 				tState.skin.body(), new net.minecraft.core.ClientAsset.ResourceTexture(tCape, tCape), tState.skin.elytra(), tState.skin.model());
 		} catch (Throwable e) {e.printStackTrace(gregapi.data.CS.ERR);}

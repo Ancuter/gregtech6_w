@@ -33,14 +33,9 @@ import java.util.List;
 
 import static gregapi.data.CS.*;
 
-/**
- * @author Gregorius Techneticies
- *
- * F3 superseded-render (GT6BlockModel/ItemModel пайплайн; старый getIcon/immediate-mode мёртв, 0 вызовов neo): {@code IIconRegister} (атлас-стежка 1.7.10) удалён в 26.1.2.
- * {@link #registerIcons(Object)} больше не стежёт атлас — строит {@link Identifier} прямо из
- * {@code mMod:materialicons/mName} (тот же путь, что раньше шёл в registerIcon(String)), форвард-
- * совместимо с будущим {@code Material(Identifier)} (decisions/F3-render.md §2.3).
- */
+/** @author Gregorius Techneticies
+ *  IIconRegister's atlas-stitching API is gone; registerIcons now just builds an Identifier directly from the
+ *  same mMod:materialicons/mName path, forward-compatible with a future Material(Identifier). */
 public class TextureSet {
 	public static final List<TextureSet> INSTANCES_ITEM = new ArrayListNoNulls<>();
 	public static final List<TextureSet> INSTANCES_BLOCK = new ArrayListNoNulls<>();
@@ -98,9 +93,9 @@ public class TextureSet {
 
 		@Override
 		public Identifier getIcon(int aRenderPass) {
-			// F3-render: 1.7.10 icon-load-фаза (sItemIconload) в neo не портирована → ленивое построение при первом рендере.
-			// try/catch: getIcon на render-потоке НЕ должен кидать (Identifier.parse бросает на невалидном пути) → null-safe (putFace пропустит).
-			if (mIconColored == null) try { registerIcons(null); } catch (Throwable e) {/* невалидный путь → остаётся null */}
+			// 1.7.10's dedicated icon-load phase wasn't ported, so the icon builds lazily on first render instead; getIcon
+			// must never throw on the render thread, so an invalid path is caught and turned into a null-safe skip.
+			if (mIconColored == null) try { registerIcons(null); } catch (Throwable e) {/* invalid path stays null */}
 			return aRenderPass == 0 ? mIconColored : mIconOverlay;
 		}
 
@@ -121,8 +116,8 @@ public class TextureSet {
 
 		@Override
 		public void registerIcons(Object aIconRegister) {
-			// F3 superseded-render: было aIconRegister.registerIcon(mMod+":materialicons/"+mName) (IIconRegister удалён) — Identifier строим напрямую.
-			// lowercase: neo Identifier.assertValidPath запрещает заглавные (имена наборов/файлов GT6 были заглавные, файлы уже переименованы).
+			// Was aIconRegister.registerIcon(...) with IIconRegister removed; the Identifier is built directly instead,
+			// lowercased since neo's Identifier forbids uppercase paths (the original names were uppercase).
 			mIconColored = Identifier.parse((mMod+":materialicons/"+mName).toLowerCase(java.util.Locale.ROOT));
 			mIconOverlay = Identifier.parse((mMod+":materialicons/"+mName+"_OVERLAY").toLowerCase(java.util.Locale.ROOT));
 		}
@@ -155,9 +150,8 @@ public class TextureSet {
 
 		@Override
 		public Identifier getIcon(int aRenderPass) {
-			// F3-render: 1.7.10 icon-load-фаза (sBlockIconload) в neo не портирована → ленивое построение при первом рендере.
-			// try/catch: getIcon на render-потоке НЕ должен кидать (Identifier.parse бросает на невалидном пути) → null-safe (putFace пропустит).
-			if (mIconColored == null) try { registerIcons(null); } catch (Throwable e) {/* невалидный путь → остаётся null */}
+			// Same lazy-build reasoning as above, for the block icon-load phase (sBlockIconload) instead of the item one.
+			if (mIconColored == null) try { registerIcons(null); } catch (Throwable e) {/* invalid path stays null */}
 			return aRenderPass == 0 ? mIconColored : mIconOverlay;
 		}
 
@@ -178,8 +172,8 @@ public class TextureSet {
 
 		@Override
 		public void registerIcons(Object aIconRegister) {
-			// F3 superseded-render: было aIconRegister.registerIcon(mMod+":materialicons/"+mName) (IIconRegister удалён) — Identifier строим напрямую.
-			// lowercase: neo Identifier.assertValidPath запрещает заглавные (имена наборов/файлов GT6 были заглавные, файлы уже переименованы).
+			// Was aIconRegister.registerIcon(...) with IIconRegister removed; the Identifier is built directly instead,
+			// lowercased since neo's Identifier forbids uppercase paths (the original names were uppercase).
 			mIconColored = Identifier.parse((mMod+":materialicons/"+mName).toLowerCase(java.util.Locale.ROOT));
 			mIconOverlay = Identifier.parse((mMod+":materialicons/"+mName+"_OVERLAY").toLowerCase(java.util.Locale.ROOT));
 		}

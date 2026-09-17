@@ -43,7 +43,7 @@ import gregapi.util.UT;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.item.ItemStack;
-import gregapi.recipes.FurnaceRecipes; // F11-smelting: 1.7.10 vanilla FurnaceRecipes воссоздан GT6-центром (neo убрал мутабельный список плавок)
+import gregapi.recipes.FurnaceRecipes; // Recreates 1.7.10's vanilla FurnaceRecipes since neo removed the mutable smelting-list API.
 import net.minecraft.nbt.CompoundTag;
 import net.neoforged.neoforge.fluids.FluidStack;
 import team.chisel.carving.Carving;
@@ -174,8 +174,8 @@ public class RM {
 		RecipeMap.sDistillationTowerRecipes=DistillationTower;RecipeMap.sAutoclaveRecipes=Autoclave;RecipeMap.sBoxinatorRecipes=Boxinator;RecipeMap.sUnboxinatorRecipes=Unboxinator;RecipeMap.sFusionRecipes=Fusion;RecipeMap.sBlastRecipes=BlastFurnace;RecipeMap.sImplosionRecipes=ImplosionCompressor;RecipeMap.sVacuumRecipes=VacuumFreezer;
 		RecipeMap.sAssemblerRecipes=Assembler;RecipeMap.sCNCRecipes=CNC;RecipeMap.sFuelsBurn=FM.Burn;RecipeMap.sFuelsGas=FM.Gas;RecipeMap.sFuelsHot=FM.Hot;RecipeMap.sFuelsPlasma=FM.Plasma;RecipeMap.sFuelsEngine=FM.Engine;RecipeMap.sFuelsTurbine=FM.Turbine;RecipeMap.sFuelsMagic=FM.Magic;
 		
-		// F12-followup (item-split): RM.<clinit> (первый доступ к RM, до server-start), но ST.make создаёт ItemStack →
-		// компоненты только на server-start. mRecipeMachineList (NEI/рантайм) читается после старта → deferItemInit.
+		// RM's static init runs before server start, but ST.make needs item components that only exist after
+		// start, so the list write is deferred alongside the rest of item init.
 		gregapi.GT_API.deferItemInit(() -> {
 		Furnace.mRecipeMachineList.add(ST.make(Blocks.FURNACE, 1, W));
 		Furnace.mRecipeMachineList.add(ST.make(Blocks.FURNACE, 1, W));
@@ -965,17 +965,14 @@ public class RM {
 		if (ST.invalid(aInput) || ST.invalid(aOutput1)) return F;
 		RM.Mortar  .addRecipe1(T, 16, 16*aPower, aInput, aOutput1, aOutput2);
 		RM.Shredder.addRecipe1(T, 16, 16*aPower, aInput, aOutput1, aOutput2);
-		// Э0 (AE2 26.1): строка ae_grinder(5*aPower, …) снята — у AE2 26.1 нет кварцевой мельницы вовсе
-		// (0 совпадений grindstone в её дереве), реестр рецептов, который она наполняла, исчез вместе с ней.
+		// AE2 no longer has a quartz grindstone at all, so the recipe registry it used to feed is gone with it.
 		te_pulverizer(UT.Code.bindInt(1000*aPower), aInput, aOutput1, aOutput2);
 		ic2_macerator(aInput, aOutput1);
 		return T;
 	}
 	
-	// Э0 (AE2 26.1): три метода ae_grinder(…) сняты вместе со своим носителем. Они писали в реестр
-	// AEApi.instance().registries().grinder() — кварцевую мельницу AE2 rv2; в AE2 26.1 машины нет,
-	// как нет и самого AEApi. Их место в цепочке дробления заняли Mortar/Shredder выше (Грег звал их
-	// в том же mortarize) — центр GT6 остался, ушёл только чужой приёмник.
+	// These wrote into AE2's own grinder registry, which no longer exists along with the grindstone itself;
+	// the mortar/shredder chain that already called into this stays, only the foreign recipient is gone.
 
 	public static boolean pulverizing(ItemStack aInput, ItemStack aOutput1) {return pulverizing(aInput, aOutput1, null, 0, F);}
 	public static boolean pulverizing(ItemStack aInput, ItemStack aOutput1, ItemStack aOutput2) {return pulverizing(aInput, aOutput1, aOutput2, 100, F);}
@@ -1154,7 +1151,7 @@ public class RM {
 		toSend.put("input", UT.NBT.make());
 		toSend.put("output", UT.NBT.make());
 		ST.writeToNBT(input, toSend.getCompoundOrEmpty("input"));
-		FL.writeToNBT(output, toSend.getCompoundOrEmpty("output")); // output = FluidStack (не ItemStack) -> FL.writeToNBT (FL.java:1148)
+		FL.writeToNBT(output, toSend.getCompoundOrEmpty("output")); // Output here is a FluidStack, not an ItemStack, so it needs FL.writeToNBT instead of the item writer.
 		InterModComms.sendTo("ThermalExpansion", "CrucibleRecipe", () -> toSend);
 	}
 	public static void te_fill(int energy, ItemStack input, ItemStack output, FluidStack fluid, boolean reversible) {

@@ -61,8 +61,7 @@ public class AdvancedCraftingShapeless extends ShapelessOreRecipe implements ICr
 	public boolean matches(CraftingInput aGrid, Level aWorld) {
 		if (mKeepingNBT) {
 			ItemStack tStack = null, tMainInput = ((getInput().get(0) instanceof ItemStack) ? (ItemStack)getInput().get(0) : null);
-			// F11: Forge InventoryCrafting.getSizeInventory()/getStackInSlot(i) удалены; neo-эквивалент —
-			// CraftingInput.size()/getItem(i). Занятость слота — ST.valid(...) (getItem(i) всегда non-null).
+			// Forge's inventory accessors are gone; occupancy is checked with ST.valid since a slot is never null now.
 			for (int i = 0; i < aGrid.size(); i++) {
 				ItemStack tSlot = aGrid.getItem(i);
 				if (ST.valid(tSlot)) {
@@ -93,8 +92,7 @@ public class AdvancedCraftingShapeless extends ShapelessOreRecipe implements ICr
 			ST.update(rStack);
 			
 			// Keeping NBT
-			// F11: CraftingInput.size()/getItem(i) (getStackInSlot/getSizeInventory удалены); ST.valid(...)
-			// заменяет "!= null" (getItem(i) всегда non-null, пустой слот = ItemStack.EMPTY).
+			// Same CraftingInput accessors as above; ST.valid replaces the old null check since a slot is never null now.
 			if (mKeepingNBT) {
 				ItemStack tMainInput = ((getInput().get(0) instanceof ItemStack) ? (ItemStack)getInput().get(0) : null);
 				for (int i = 0; i < aGrid.size(); i++) {
@@ -124,8 +122,7 @@ public class AdvancedCraftingShapeless extends ShapelessOreRecipe implements ICr
 			if (mDismantleable) {
 				CompoundTag rNBT = ItemNBT.get(rStack), tNBT = UT.NBT.make();
 				if (rNBT == null) rNBT = UT.NBT.make();
-				// F11 (АДАПТИРОВАНО): см. AdvancedCraftingShaped — Math.min(9,size()) охраняет подрезанную neo-сетку
-				// (F11-crafting-recipe.md §7), 1:1 для полного 3x3. Не заглушка.
+				// Same fixed-3x3 guard as the shaped variant, safe on the engine's trimmed grid.
 				for (int i = 0, j = Math.min(9, aGrid.size()); i < j; i++) {
 					ItemStack tStack = aGrid.getItem(i);
 					if (ST.valid(tStack) && ST.container(tStack, true) == null && !(tStack.getItem() instanceof MultiItemTool)) {

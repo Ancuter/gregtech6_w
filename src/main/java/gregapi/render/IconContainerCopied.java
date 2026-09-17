@@ -29,13 +29,9 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.resources.Identifier;
 
-/**
- * @author Gregorius Techneticies
- *
- * Copies the Icon of another Block's Side+Meta (e.g. Dirt below Grass). F3 block-icon-data ЗАКРЫТ:
- * {@code Block.getIcon(side,meta)} удалён в 26.1.2 (baked-model рендер) — {@link #getIcon(int)} резолвит спрайт
- * грани копируемого блока из его baked {@code BlockStateModel} ({@link GT6QuadBuilder#resolveBlockFaceIcon}).
- */
+/** @author Gregorius Techneticies
+ *  Copies the icon of another block's side+meta (e.g. dirt below grass).
+ *  Block.getIcon(side,meta) is gone in neo; the sprite comes from the copied block's baked BlockStateModel instead. */
 public class IconContainerCopied implements IIconContainer {
 	private final Block mBlock;
 	private final byte mSide, mMeta;
@@ -50,9 +46,8 @@ public class IconContainerCopied implements IIconContainer {
 
 	@Override
 	public Identifier getIcon(int aRenderPass) {
-		// F3 block-icon-data: было mBlock.getIcon(mSide, mMeta) — Block.getIcon удалён (neo baked-model рендер);
-		// спрайт грани копируемого блока резолвим из его baked BlockStateModel (централизованный §3
-		// GT6QuadBuilder.resolveBlockFaceIcon), mMeta учтён (Flattening-варианты). catch→RENDERING_ERROR — модели могут быть не готовы вне рендер-тика.
+		// Was mBlock.getIcon(mSide,mMeta), now resolved from the copied block's baked model via the centralized
+		// resolveBlockFaceIcon; exceptions fall back to RENDERING_ERROR since models may not be ready outside the render tick.
 		try {
 			return GT6QuadBuilder.resolveBlockFaceIcon(mBlock, mSide, mMeta);
 		} catch (Throwable e) {

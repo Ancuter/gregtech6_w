@@ -269,9 +269,8 @@ public abstract class Abstract_Mod {
 			OUT.println(getModNameForLog() + ": PostInit-Phase finished!");
 			ORD.println(getModNameForLog() + ": PostInit-Phase finished!");
 			
-			// F12-followup (item-split): compat.onPostLoad (рецепт-загрузчики) + mAfterPostInit (MultiItem.addItems) делают
-			// ST.make/CR/RM → компоненты только на server-start. На postInit они падали молча (try/catch) → рецепты/предметы
-			// терялись (низкий prefixes-паритет). Откладываем ОБА в deferItemInit (server-start), порядок сохранён.
+			// Both used to fail silently at postInit because components only exist at server start;
+			// deferring both to deferItemInit fixes the silent item/recipe loss while keeping their order.
 			gregapi.GT_API.deferItemInit(() -> {
 			if (!mCompatClasses.isEmpty()) {
 				UT.LoadingBar.start("Loading Compat (PostInit)", mCompatClasses.size());
@@ -308,8 +307,8 @@ public abstract class Abstract_Mod {
 	}
 	
 	public void onModServerStarting(ServerStartingEvent aEvent) {
-		// DUMMY-МИР строится здесь, а не на конструировании мода: Level требует реестр биомов, которого на той
-		// фазе ещё нет (см. gregapi.dummies.DummyWorld.ensure и GT_API, где стояла падавшая попытка).
+		// Built here rather than at mod construction because a Level needs the biome registry,
+		// which does not exist yet at that earlier phase.
 		gregapi.dummies.DummyWorld.ensure(aEvent.getServer().registryAccess());
 		loadRunnables(mBeforeServerStarting);
 		mStartedServerStarting++;

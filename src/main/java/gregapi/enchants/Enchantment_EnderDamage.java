@@ -29,16 +29,9 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.enchantment.Enchantment;
 
-/**
- * @author Gregorius Techneticies
- *
- * <p>Форс движка, см. {@link Enchantment_WerewolfDamage}. Игровая логика перенесена 1:1 в
- * {@link EnchantmentEffect_Ender}; bootstrap — {@link EnchantsGT6#bootstrap}.
- *
- * F8 (1:1): материал→чара назначения (golden ctor {@code MT.Hg.addEnchantmentForDamage(this,3)} и далее) ПЕРЕНЕСЕНЫ
- * в {@code MT.init()} (enchant-блок, рядом с vanilla-назначениями) как {@code Hg.addEnchantmentForDamage(KEY,3)}.
- * Материалы Hg/Ag/сталь/… снова несут Disjunction. Не заглушка.
- */
+/** @author Gregorius Techneticies
+ *  Engine-forced split, see {@link Enchantment_WerewolfDamage}; game logic moved 1:1 into
+ *  {@link EnchantmentEffect_Ender}. Material-to-enchantment assignments were moved into MT.init() intact. */
 public class Enchantment_EnderDamage {
 	public static final ResourceKey<Enchantment> KEY =
 		ResourceKey.create(Registries.ENCHANTMENT, Identifier.fromNamespaceAndPath(MD.GAPI.mID, "disjunction"));

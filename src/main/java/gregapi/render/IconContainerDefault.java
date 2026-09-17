@@ -28,11 +28,8 @@ import static gregapi.data.CS.*;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.resources.Identifier;
 
-/**
- * F3 superseded-render (GT6BlockModel/ItemModel пайплайн; старый getIcon/immediate-mode мёртв, 0 вызовов neo): конструкторы принимали {@code IIcon} (тип удалён в 26.1.2) —
- * теперь принимают {@link Identifier} как нейтральный держатель ссылки на текстуру, форвард-совместимый
- * с будущим {@code Material(Identifier)} (decisions/F3-render.md §2.3).
- */
+/** Constructors used to take an IIcon (removed); they now take an Identifier as a neutral holder,
+ *  forward-compatible with a future Material(Identifier). */
 public class IconContainerDefault implements IIconContainer {
 	public final Identifier mTextureFile;
 	public final Identifier mIcon;

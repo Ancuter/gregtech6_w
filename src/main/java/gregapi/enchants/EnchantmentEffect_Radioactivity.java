@@ -32,14 +32,8 @@ import net.minecraft.world.item.enchantment.EnchantedItemInUse;
 import net.minecraft.world.item.enchantment.effects.EnchantmentEntityEffect;
 import net.minecraft.world.phys.Vec3;
 
-/**
- * @author Gregorius Techneticies
- *
- * 1:1-перенос игровой логики {@code Enchantment_Radioactivity.func_151367_b}
- * (`gregtech6/src/main/java/gregapi/enchants/Enchantment_Radioactivity.java:84-86`) — только
- * механизм-носитель сменён, см. {@link EnchantmentEffect_Werewolf}. Делегат {@code UT.Entities.
- * applyRadioactivity(aHurtEntity, aLevel, 1)} не изменён (сигнатура/аргументы дословны).
- */
+/** @author Gregorius Techneticies
+ *  1:1 transfer of the original effect logic, mechanism change only; see {@link EnchantmentEffect_Werewolf}. */
 public record EnchantmentEffect_Radioactivity() implements EnchantmentEntityEffect {
 	public static final MapCodec<EnchantmentEffect_Radioactivity> CODEC = MapCodec.unit(new EnchantmentEffect_Radioactivity());
 

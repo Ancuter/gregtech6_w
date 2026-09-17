@@ -40,9 +40,8 @@ import net.neoforged.neoforge.fluids.FluidStack;
 import static gregapi.data.CS.*;
 import static gregapi.data.OP.*;
 
-// Э0 (AE2 26.1): из слушателей ниже сняты 10 строк с вызовом мельницы AE2 — кварцевой мельницы больше нет
-// (метод удалён в RM.java вместе с носителем). Соседние рецепты тех же слушателей (RM.crop/crop_nut/Squeezer/
-// Juicer) не тронуты: дробление тех же плодов у GT6 своё, через Mortar/Shredder в RM.mortarize.
+// AE2 26.1 removed the quartz grindstone with its method in RM.java, so its 10 listener calls are dropped.
+// Neighbouring recipes are untouched: GT6's own crushing of the same produce goes through Mortar/Shredder.
 public class Loader_Recipes_Crops implements Runnable {
 	@Override public void run() {
 		for (OreDictMaterial tMat : ANY.FlourGrains.mToThis) {

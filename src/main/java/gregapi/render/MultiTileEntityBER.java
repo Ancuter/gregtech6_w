@@ -43,50 +43,17 @@ import net.minecraft.world.phys.Vec3;
 import gregapi.block.multitileentity.MultiTileEntityBlock;
 import gregapi.tileentity.base.TileEntityBase01Root;
 
-/**
- * F3-render спец-рендеры MTE (1.7.10 {@code ClientRegistry.bindTileEntitySpecialRenderer}) — и ТОЛЬКО они.
- *
- * <p><b>BUG-138 носитель №2.</b> Прежде этот BlockEntityRenderer строил и заливал геометрию ВСЕХ MTE КАЖДЫЙ КАДР
- * (303 класса: машины, трубы, камни, кусты, покрытия) — 38,85 % рендер-потока живого клиента, из них 35,4 % на
- * заливку вершин. Обоснованием служило «регион чанк-компиляции BE не отдаёт (getBlockEntity=null 100%)»; живая
- * проба (стенд {@code gt6meshgate}, 2026-08-21) показала обратное: регион отдаёт ТОТ ЖЕ живой объект BE
- * ({@code RenderSectionRegion.getBlockEntity:73-79} → {@code SectionCopy:34,47-49} — копируется КАРТА, не сущности).
- * Поэтому облик MTE снова живёт в МЭШЕ СЕКЦИИ — его собирает {@link GT6BlockModel#collectParts} тем же центром
- * {@link GT6BlockModel#buildRendererQuads}, ровно как в 1.7.10 ({@code MultiTileEntityBlock.getRenderType()} →
- * {@code RendererBlockTextured implements ISimpleBlockRenderingHandler}, оригинал {@code :295}).
- *
- * <p><b>Что осталось покадровым — 1:1 с оригиналом.</b> В 1.7.10 у GT6 было РОВНО ДВА покадровых рендерера
- * (сундук и масс-сторадж). Здесь их держит реестр {@link #SPECIAL_RENDERERS} — диспетч по КЛАССУ внутри единого
- * BER, потому что движок регистрирует рендерер по {@code BlockEntityType}, а он у всех MTE один из двух. Всем
- * прочим MTE {@link #extractRenderState} геометрию НЕ строит.
- *
- * <p><b>Трещины разрушения.</b> Признак «по этому блоку идёт разрушение» движок кладёт прямо в аргумент
- * {@code extractRenderState} ({@code ModelFeatureRenderer.CrumblingOverlay}, {@code LevelRenderer:939-945});
- * по нему и строится живая геометрия ломаемого блока, чтобы трещины легли на его ФАКТИЧЕСКУЮ форму — 1:1 с
- * 1.7.10, где {@code RenderGlobal.drawBlockDamageTexture} звал тот же {@code RendererBlockTextured} с реальным миром.
- *
- * <p>Руды ({@code PrefixBlockTileEntity}) и стабы отсеиваются тем же гейтом, что и раньше.
- */
+/** Builds per-frame geometry only for the two MTE with a dedicated 1.7.10 renderer (chest, mass storage) and for
+ *  the currently-breaking block's crack decals; every other MTE lives in the section mesh via collectParts. */
 public class MultiTileEntityBER implements BlockEntityRenderer<TileEntityBase01Root, MultiTileEntityBER.MTERenderState> {
 
-	public MultiTileEntityBER(BlockEntityRendererProvider.Context aContext) {/* per-BE геометрия строится в extractRenderState; ресурсы контекста тут не нужны */}
+	public MultiTileEntityBER(BlockEntityRendererProvider.Context aContext) {/* per-BE geometry is built in extractRenderState; context resources aren't needed here */}
 
-	// BUG-138: переопределение дистанции СНЯТО. Оно стояло потому, что геометрия MTE шла через этот BER и пропадала
-	// за движковыми 64 блоками; теперь она в мэше секции и рисуется на всю дальность прорисовки. Дефолт движка
-	// (64 блока) — ровно 1:1 с 1.7.10, где TESR резался тем же радиусом (TileEntity.getMaxRenderDistanceSquared()
-	// == 4096), а покадровыми были только сундук и масс-сторадж.
+	// The render-distance override is removed: MTE geometry now lives in the section mesh and draws at full
+	// distance, and the engine's 64-block default already matches 1.7.10's own TESR clipping radius.
 
-	/** BUG-063 (репорт игрока: «как только центральный нижний блок выходит за границы экрана, весь тигель сразу
-	 *  пропадает»): neo отсекает рисунок BE по ЭТОЙ рамке ({@code BlockEntityRenderDispatcher:90}), а её умолчание —
-	 *  куб самого блока ({@code IBlockEntityRendererExtension:20-22}). У GT6 геометрия за свой блок выходит штатно
-	 *  (тигель рисует всю структуру 3×3×3 из контроллера — {@code MultiTileEntityCrucible:648-653}; лопасти турбины,
-	 *  коннекторы труб), а в 1.7.10 такого узла не было вовсе: MTE рисовались мэшем чанка и отсекались секцией 16³
-	 *  ({@code RendererBlockTextured implements ISimpleBlockRenderingHandler}), TESR же имели дефолт INFINITE
-	 *  ({@code recompSrc TileEntity:399-420}). Рамку НЕ ЗАДАЁМ константой — у GT6 боксы вычисляются в рантайме;
-	 *  берём ФАКТИЧЕСКУЮ геометрию прошлого кадра ({@link gregapi.render.GT6QuadBuilder#drawnBounds}), а пока она
-	 *  неизвестна — один кадр без отсечения, чтобы extract состоялся и рамка стала известна (дистанция при этом
-	 *  по-прежнему режет: фрустум проверяется ДО shouldRender). Приём канонический: так же объявляют рамку маяк
-	 *  (луч в небо), сундук (крышка) и поршень ({@code BeaconRenderer:221}, {@code ChestRenderer:136}, {@code PistonHeadRenderer:96}). */
+	/** Neo clips a block entity's render by this box, defaulting to just its own cube, unlike 1.7.10 where MTE drew via
+	 *  the section mesh; the box uses last frame's drawn geometry, skipping the clip for one frame while unknown. */
 	@Override
 	@SuppressWarnings({"rawtypes", "unchecked"})
 	public net.minecraft.world.phys.AABB getRenderBoundingBox(TileEntityBase01Root aBE) {
@@ -95,58 +62,36 @@ public class MultiTileEntityBER implements BlockEntityRenderer<TileEntityBase01R
 		if (tSpecial != null) try {
 			net.minecraft.world.phys.AABB tSpecialBox = tSpecial.getRenderBoundingBox(aBE);
 			rBox = rBox == null ? tSpecialBox : (tSpecialBox == null ? rBox : rBox.minmax(tSpecialBox));
-		} catch (Throwable e) {/* чужая рамка не должна ронять кадр */}
+		} catch (Throwable e) {/* a broken bounding box from one MTE must not crash the frame */}
 		return rBox == null ? net.minecraft.world.phys.AABB.INFINITE : rBox;
 	}
 
-	// F3-render спец-рендеры (1.7.10 ClientRegistry.bindTileEntitySpecialRenderer = vanilla-диспетчер по КЛАССУ TE;
-	// в neo BER регистрируется по BlockEntityType, а у всех MTE он ОДИН — MTE_TYPE) → диспетч по классу живёт здесь,
-	// в едином BER: реестр класс→рендерер, extract/submit делегируются. Оба живых TESR GT6 (Chest/MassStorage) идут сюда.
+	// Since neo registers a BER per BlockEntityType and every MTE shares one type, per-class dispatch (matching
+	// 1.7.10's ClientRegistry.bindTileEntitySpecialRenderer) has to live here instead, in a class->renderer registry.
 	@SuppressWarnings("rawtypes")
 	private static final java.util.Map<Class<?>, BlockEntityRenderer> SPECIAL_RENDERERS = new java.util.HashMap<>();
 	public static void bindSpecialRenderer(Class<?> aTileEntityClass, @SuppressWarnings("rawtypes") BlockEntityRenderer aRenderer) {SPECIAL_RENDERERS.put(aTileEntityClass, aRenderer);}
 
-	/** Диаг-счётчики кэша квадов (BUG-106 №4): extract'ы рендер-объектов / реальные пересборки / кэш-хиты. */
+	/** Diagnostic counters for the quad cache: render-object extracts, real rebuilds, and cache hits. */
 	public static final java.util.concurrent.atomic.AtomicLong sQuadExtracts = new java.util.concurrent.atomic.AtomicLong(), sQuadBuilds = new java.util.concurrent.atomic.AtomicLong(), sQuadCacheHits = new java.util.concurrent.atomic.AtomicLong();
-	/** Счётчик вызовов {@link #onSectionDirty} — судья шторма O(N) (живой стенд gt6berstorm). */
+	/** Call counter for onSectionDirty, used by the gt6berstorm stand to catch an O(N) call storm. */
 	public static final java.util.concurrent.atomic.AtomicLong sSectionDirtyCalls = new java.util.concurrent.atomic.AtomicLong();
 
-	/** BUG-106 №4 — кэш квадов BER. Эпоха рендера: {@code allChanged()} (перешив атласа/моделей — F3+T, F3+A,
-	 *  смена дистанции; кэшированные квады держат UV СТАРОГО атласа) рвёт ВСЕ кэши разом, O(1). Точечный сброс —
-	 *  {@link #onSectionDirty}: та же воронка, которой движок помечает секции на перестройку, то есть ровно тот
-	 *  сигнал, по которому в 1.7.10 пересобирался мэш с геометрией MTE (recompSrc RenderGlobal.markBlockForUpdate →
-	 *  markBlockRangeForRenderUpdate ±1). Всё общение клиента о смене облика уже проходит через неё:
-	 *  каждый receiveData*-диспетчер ({@code MultiTileEntityBlock:265-325}) кончается {@code WD.update} →
-	 *  {@code ClientLevel.sendBlockUpdated:701} → {@code LevelRenderer.blockChanged:1432} → setSectionDirty;
-	 *  прямые setBlock и свет — туда же ({@code viewArea.setDirty} зовётся ТОЛЬКО из setSectionDirty:1481).
-	 *  Залипание кэша возможно лишь там, где залипал бы и мэш 1.7.10 — 1:1 по следствию. */
+	/** The quad cache is invalidated wholesale on atlas/model reshuffles (allChanged, since cached UVs would go stale)
+	 *  and per-section via onSectionDirty, the same funnel the engine already uses whenever a block's appearance changes. */
 	public static long sQuadEpoch = 0;
 
-	/** ШТАМП СЕКЦИИ — цена сигнала (волна 3 консолидации, п.2). Сигнал {@code setSectionDirty} для движка стоит
-	 *  один флаг ({@code viewArea.setDirty}), поэтому он зовёт его ПАЧКАМИ: {@code setBlockDirty} крутит ±1 по
-	 *  трём осям и бьёт 27 раз на ОДНО изменение блока ({@code LevelRenderer.java:1446-1460}), а приход чанка
-	 *  добавляет свет ({@code ClientPacketListener.enableChunkLight} → {@code Level.setSectionRangeDirty}, 3×3×N
-	 *  секций по Y). Прежняя редакция вешала на этот сигнал обход ВСЕХ блок-сущностей чанка — живой замер
-	 *  (стенд gt6berstorm, полёт в непрогруженную область) дал сотни тысяч вызовов и миллионы бесполезных
-	 *  итераций за десятки секунд.
-	 *
-	 *  <p>Работа снята с сигнала и отдана моменту рендера: сигнал лишь ПЕЧАТАЕТ секцию (инкремент, O(1)), а
-	 *  валидность кэша каждый MTE проверяет сам, сверяя свой оттиск со штампом своей секции. Гранулярность и
-	 *  момент инвалидации те же, что были (та же воронка, та же секция) — дешевеет только цена, поэтому 1:1
-	 *  по следствию с мэшем 1.7.10 сохраняется.
-	 *
-	 *  <p>Смена мира карту не переживает: {@code LevelRenderer.setLevel} зовёт {@code allChanged()} →
-	 *  {@link #onRenderAllChanged} чистит её тем же движковым сигналом, которым рвутся и эпохи. Отдельного
-	 *  механизма выгрузки не заводим. */
+	/** setSectionDirty is cheap for the engine but called in large batches per block change, so a per-section scan on
+	 *  every call was measured causing a call storm; work moved to render time, where each MTE compares stamps. */
 	private static final it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap SECTION_STAMP = new it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap();
 
-	/** Печать секции (зовёт MixinLevelRenderer из setSectionDirty, main-thread). O(1) — ни чанка, ни его блок-сущностей. */
+	/** Stamps a section from setSectionDirty on the main thread; O(1), touching neither the chunk nor its block entities. */
 	public static void onSectionDirty(int aSectionX, int aSectionY, int aSectionZ) {
 		sSectionDirtyCalls.incrementAndGet();
 		SECTION_STAMP.addTo(net.minecraft.core.SectionPos.asLong(aSectionX, aSectionY, aSectionZ), 1L);
 	}
 
-	/** Штамп секции, в которой лежит позиция (0 = секцию не помечали ни разу — законное значение, см. рендер). */
+	/** Stamp of the section holding this position; 0 is a legitimate value meaning the section was never marked. */
 	private static long sectionStamp(BlockPos aPos) {
 		return SECTION_STAMP.get(net.minecraft.core.SectionPos.asLong(
 			  net.minecraft.core.SectionPos.blockToSectionCoord(aPos.getX())
@@ -154,17 +99,16 @@ public class MultiTileEntityBER implements BlockEntityRenderer<TileEntityBase01R
 			, net.minecraft.core.SectionPos.blockToSectionCoord(aPos.getZ())));
 	}
 
-	/** Полный сброс (зовёт MixinLevelRenderer из allChanged, main-thread): эпоха рвёт все кэши разом, штампы
-	 *  секций теряют смысл вместе с ней (иначе карта росла бы от мира к миру). */
+	/** Full reset from allChanged: the epoch invalidates every cache at once, and section stamps clear with it,
+	 *  so the map doesn't grow across world switches. */
 	public static void onRenderAllChanged() {sQuadEpoch++; SECTION_STAMP.clear();}
-	/** Счётчик crack-decal сабмитов (судья трещин). */
+	/** Counter of crack-decal submits, used as the test judge for crack rendering. */
 	public static final java.util.concurrent.atomic.AtomicLong sCrackSubmits = new java.util.concurrent.atomic.AtomicLong();
 
 	public static boolean hasSpecialRenderer(Class<?> aTileEntityClass) {return SPECIAL_RENDERERS.containsKey(aTileEntityClass);}
 
-	/** Item-форма TESR-классов: 1.7.10 renderItem звал renderTileEntityAt(this,0,0,0,0) на canonical-TE (данные из NBT
-	 *  стека); neo-носитель — special-model слой предмета ({@code LayerRenderState.setupSpecialModel}) → ЭТОТ адаптер:
-	 *  тот же зарегистрированный спец-рендерер (диспетч по классу), extract с detached-BE (fullbright по extractBase). */
+	/** Item-form of TESR classes: 1.7.10 called the special renderer directly on a canonical TE built from stack NBT;
+	 *  neo's carrier is the item's special-model layer, which routes here to the same registered renderer by class. */
 	public static final net.minecraft.client.renderer.special.SpecialModelRenderer<net.minecraft.world.level.block.entity.BlockEntity> SPECIAL_ITEM_FORM = new net.minecraft.client.renderer.special.SpecialModelRenderer<net.minecraft.world.level.block.entity.BlockEntity>() {
 		@Override
 		@SuppressWarnings("unchecked")
@@ -177,7 +121,7 @@ public class MultiTileEntityBER implements BlockEntityRenderer<TileEntityBase01R
 				tRenderer.extractRenderState(aBE, tState, 0, Vec3.ZERO, null);
 				tState.lightCoords = aLight;
 				tRenderer.submit(tState, aPoseStack, aNodes, null);
-			} catch (Throwable e) {/* item-форма не должна ронять рендер */}
+			} catch (Throwable e) {/* item-form must not crash the render */}
 		}
 		@Override public void getExtents(java.util.function.Consumer<org.joml.Vector3fc> aOutput) {
 			for (int x = 0; x <= 1; x++) for (int y = 0; y <= 1; y++) for (int z = 0; z <= 1; z++) aOutput.accept(new org.joml.Vector3f(x, y, z));
@@ -186,8 +130,8 @@ public class MultiTileEntityBER implements BlockEntityRenderer<TileEntityBase01R
 			try {
 				if (aStack.getItem() instanceof gregapi.block.multitileentity.MultiTileEntityItemInternal tMTE) {
 					gregapi.block.multitileentity.MultiTileEntityContainer tCont = tMTE.mBlock.mMultiTileEntityRegistry.getNewTileEntityContainer(aStack);
-					// BUG-078: ВТОРОЙ путь рождения detached-TE (предметы со своим рендерером: сундук, масстораж).
-					// Компенсация item-facing берётся из того же центра, что и у обычного item-рендера.
+					// Second path where a detached TE is born, for items with their own special renderer (chest, mass
+					// storage); facing compensation comes from the same center as the ordinary item renderer.
 					if (tCont != null && tCont.mTileEntity != null && SPECIAL_RENDERERS.containsKey(tCont.mTileEntity.getClass())) return gregapi.block.multitileentity.MultiTileEntityRegistry.applyItemFacing(tCont.mTileEntity);
 				}
 			} catch (Throwable e) {/**/}
@@ -195,7 +139,7 @@ public class MultiTileEntityBER implements BlockEntityRenderer<TileEntityBase01R
 		}
 	};
 
-	/** Снапшот геометрии, собранной на main-thread (thread-safe: submit его лишь читает). */
+	/** Snapshot of geometry collected on the main thread; thread-safe since submit only reads it. */
 	public static class MTERenderState extends BlockEntityRenderState {
 		public List<BakedQuad> mQuads;
 		@SuppressWarnings("rawtypes") public BlockEntityRenderer mSpecialRenderer;
@@ -207,54 +151,47 @@ public class MultiTileEntityBER implements BlockEntityRenderer<TileEntityBase01R
 	@Override
 	@SuppressWarnings("unchecked")
 	public void extractRenderState(TileEntityBase01Root aBE, MTERenderState aState, float aPartialTicks, Vec3 aCameraPos, ModelFeatureRenderer.CrumblingOverlay aBreakProgress) {
-		BlockEntityRenderer.super.extractRenderState(aBE, aState, aPartialTicks, aCameraPos, aBreakProgress); // база: blockPos/lightCoords/breakProgress
+		BlockEntityRenderer.super.extractRenderState(aBE, aState, aPartialTicks, aCameraPos, aBreakProgress); // base fields: blockPos, lightCoords, breakProgress
 		aState.mQuads = null;
 		aState.mSpecialRenderer = null; aState.mSpecialState = null;
 		Block tBlock = aBE.getBlockState().getBlock();
-		// Только MTE-блоки с render-объектом: руды(PrefixBlock/PrefixBlockTileEntity) и стабы(TileEntityLoaderStub, render-данных нет) → baked/пусто.
-		// BUG-063: рамку отсечения гейт-отсеянным ставим ЗДЕСЬ — иначе она навсегда осталась бы неизвестной,
-		// а неизвестная = «не отсекать» (см. getRenderBoundingBox). Их геометрия — обычный куб блока.
+		// Ores and stubs have no render object, so their clip box is set to a plain block cube here directly; otherwise
+		// it would stay unknown forever, and an unknown box means 'don't clip' (see getRenderBoundingBox).
 		if (aBE.getLevel() == null || !(aBE instanceof IRenderedBlockObject tRenderer) || !(tBlock instanceof MultiTileEntityBlock)) {
 			aBE.mRenderAABB = new net.minecraft.world.phys.AABB(aBE.getBlockPos());
 			return;
 		}
 		@SuppressWarnings("rawtypes") BlockEntityRenderer tSpecial = SPECIAL_RENDERERS.get(aBE.getClass());
-		// BUG-138 — ГЛАВНЫЙ ГЕЙТ. Облик MTE собран в мэше секции (GT6BlockModel.collectParts), поэтому строить и
-		// заливать его здесь ещё раз — чистая двойная работа каждый кадр. Живая геометрия нужна ровно двум:
-		// ломаемому блоку (по ней ниже эмитятся трещины) и классам со своим покадровым рендерером (сундук,
-		// масс-сторадж — те самые два TESR 1.7.10). Рамка = куб блока: рисунка BE у остальных больше нет,
-		// а мэш секции отсекается своей секцией 16³ — как в 1.7.10.
+		// Main gate: MTE's look is already built in the section mesh, so rebuilding it here every frame would be pure
+		// double work; live geometry is needed only for the breaking block's cracks and the two per-frame renderers.
 		if (tSpecial == null && aBreakProgress == null) {
 			aBE.mRenderAABB = new net.minecraft.world.phys.AABB(aBE.getBlockPos());
 			return;
 		}
 		BlockPos tPos = aBE.getBlockPos();
-		// Рамку куба ставим только тем, у кого своего покадрового рендерера НЕТ. У сундука и масс-стоража она
-		// остаётся неизвестной (= не отсекать, см. getRenderBoundingBox) — ровно как в 1.7.10, где у TESR рамка
-		// по умолчанию была БЕСКОНЕЧНОЙ (recompSrc TileEntity:399-420), а их аниматика может выходить за блок.
+		// The cube clip box is set only for MTE without their own per-frame renderer; chest and mass-storage keep it
+		// unknown (don't clip), matching 1.7.10's INFINITE default for TESR whose animation can extend past the block.
 		if (tSpecial == null) aBE.mRenderAABB = new net.minecraft.world.phys.AABB(tPos);
-		// Живая геометрия — ТОЛЬКО ломаемому блоку: по ней submit кладёт трещины на фактическую форму (1:1 с 1.7.10,
-		// RenderGlobal.drawBlockDamageTexture → тот же RendererBlockTextured). Спец-рендерер свою аниматику рисует сам.
+		// Live geometry is built only for the currently-breaking block, so its crack decals land on the actual shape
+		// (1:1 with 1.7.10's drawBlockDamageTexture); a special renderer draws its own animation independently.
 		if (aBreakProgress != null) {
 			sQuadExtracts.incrementAndGet();
-			// BUG-106 №4: кэш-хит — облик с кадра построения не менялся, то есть НИ эпоха рендера (перешив атласа),
-			// НИ штамп СВОЕЙ секции с того кадра не сдвинулись (волна 3 консолидации, п.2). Штамп 0 у ни разу не
-			// помеченной секции — законное значение: первый кадр даёт промах (оттиск заведён Long.MIN_VALUE), после
-			// него 0 == 0 и кэш живёт.
+			// A cache hit means neither the render epoch nor the own section's stamp changed since the build frame; a
+			// never-marked section's stamp of 0 is legitimate since the first frame always starts as a guaranteed miss.
 			long tSectionStamp = sectionStamp(tPos);
 			if (aBE.mQuadCacheEpoch == sQuadEpoch && aBE.mQuadCacheSectionStamp == tSectionStamp) {
 				aState.mQuads = aBE.mQuadCache;
 				sQuadCacheHits.incrementAndGet();
 			} else {
 				GT6QuadBuilder tQB = new GT6QuadBuilder();
-				try { GT6BlockModel.buildRendererQuads(tQB, tRenderer, tBlock, aBE.getLevel(), tPos.getX(), tPos.getY(), tPos.getZ()); } catch (Throwable e) {/* render-логика конкретного MTE не должна ронять кадр */}
+				try { GT6BlockModel.buildRendererQuads(tQB, tRenderer, tBlock, aBE.getLevel(), tPos.getX(), tPos.getY(), tPos.getZ()); } catch (Throwable e) {/* one MTE's render logic must not crash the frame */}
 				if (!tQB.isEmpty()) aState.mQuads = tQB.quads();
-				// BUG-063: рамка = ФАКТИЧЕСКИ нарисованное этим BE (quads строятся в локальных координатах блока → сдвигаем в мир).
+				// Clip box is set to what this block entity actually drew, shifting the quads' local coordinates into world space.
 				float[] tDrawn = tQB.drawnBounds();
 				if (tDrawn != null) aBE.mRenderAABB = new net.minecraft.world.phys.AABB(
 					  tPos.getX() + Math.min(tDrawn[0], 0F), tPos.getY() + Math.min(tDrawn[1], 0F), tPos.getZ() + Math.min(tDrawn[2], 0F)
 					, tPos.getX() + Math.max(tDrawn[3], 1F), tPos.getY() + Math.max(tDrawn[4], 1F), tPos.getZ() + Math.max(tDrawn[5], 1F));
-				aBE.mQuadCache = aState.mQuads; // null = «квадов нет» — тоже кэшируется (валидность судят эпоха и штамп секции)
+				aBE.mQuadCache = aState.mQuads; // null = 'no quads', also cached (validity is judged by epoch and section stamp).
 				aBE.mQuadCacheEpoch = sQuadEpoch;
 				aBE.mQuadCacheSectionStamp = tSectionStamp;
 				sQuadBuilds.incrementAndGet();
@@ -272,16 +209,15 @@ public class MultiTileEntityBER implements BlockEntityRenderer<TileEntityBase01R
 	public void submit(MTERenderState aState, PoseStack aPoseStack, SubmitNodeCollector aNodes, CameraRenderState aCamera) {
 		final List<BakedQuad> tQuads = aState.mQuads;
 		if (tQuads != null && !tQuads.isEmpty()) {
-			final QuadInstance tQI = new QuadInstance(); // color=-1 (белый, не перетинтит baked-цвет quad'а); light из позиции блока
+			final QuadInstance tQI = new QuadInstance(); // color=-1 (white, doesn't retint the baked quad's own color); light comes from the block's position.
 			tQI.setLightCoords(aState.lightCoords);
-			// quads GT6QuadBuilder — уже в локальных координатах блока 0..1 (как baked-модель); PoseStack на submit уже в позиции блока.
+			// GT6QuadBuilder's quads are already in local 0..1 block coordinates, like a baked model, and the
+			// PoseStack at submit time is already positioned at the block.
 			aNodes.submitCustomGeometry(aPoseStack, Sheets.cutoutBlockSheet(), (tPose, tBuffer) -> {
 				for (BakedQuad tQuad : tQuads) tBuffer.putBakedQuad(tPose, tQuad, tQI);
 			});
-			// F3-render ТРЕЩИНЫ по ЖИВОЙ геометрии (репорт игрока: «в оригинале трещины ложились прямо на поверхность
-			// трубы/камня/верёвки»): submitCustomGeometry crumbling не несёт (он только у submitModel,
-			// ModelFeatureRenderer:112) → эмитим сами ТЕ ЖЕ quads через SheetedDecalTextureGenerator (UV из позиции,
-			// как ванильный BE-crumbling) в DESTROY_TYPES[progress]. breakProgress кладёт движок
+			// submitCustomGeometry has no built-in crumbling support, so the same live quads are re-emitted through
+			// SheetedDecalTextureGenerator so crack decals land on the actual surface, instead of a flat block face.
 			// (LevelRenderer:939-945 → extractRenderState → BlockEntityRenderState.breakProgress).
 			final net.minecraft.client.renderer.feature.ModelFeatureRenderer.CrumblingOverlay tBreak = aState.breakProgress;
 			if (tBreak != null) {
@@ -293,6 +229,6 @@ public class MultiTileEntityBER implements BlockEntityRenderer<TileEntityBase01R
 			}
 		}
 		if (aState.mSpecialRenderer != null && aState.mSpecialState != null)
-			try {aState.mSpecialRenderer.submit(aState.mSpecialState, aPoseStack, aNodes, aCamera);} catch (Throwable e) {/* спец-рендер не должен ронять кадр */}
+			try {aState.mSpecialRenderer.submit(aState.mSpecialState, aPoseStack, aNodes, aCamera);} catch (Throwable e) {/* a broken special renderer must not crash the frame */}
 	}
 }

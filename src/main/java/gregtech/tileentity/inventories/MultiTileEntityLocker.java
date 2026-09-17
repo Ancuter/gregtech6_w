@@ -70,10 +70,8 @@ public class MultiTileEntityLocker extends TileEntityBase09FacingSingle implemen
 				ItemStack tStack = slot(i);
 				if (tStack == null || aPlayer.getEquipmentSlotForItem(tStack) == ARMOR_SLOTS[i]) {
 					if (!IL.BTRS_Backpack.equal(aPlayer.getItemBySlot(ARMOR_SLOTS[i]), T, T) && !IL.BTRS_Thaumpack.equal(aPlayer.getItemBySlot(ARMOR_SLOTS[i]), T, T)) {
-						// F15-граница ОБЕ стороны через центр (ST.nn/ST.ni): в 1.7.10 пустота = null и
-						// setCurrentItemOrArmor(null) был законен; в neo экипировка обязана быть EMPTY.
-						// Голый tStack==null в setItemSlot ронял broadcastChanges инвентаря следующим тиком
-						// (NPE current::copy, AbstractContainerMenu:198) — живая приёмка двора 2026-08-13.
+						// Both sides go through the center (ST.nn/ST.ni): in 1.7.10 empty meant null and setCurrentItemOrArmor(null) was legal.
+						// In neo equipment must be EMPTY.
 						slot(i, ST.ni(aPlayer.getItemBySlot(ARMOR_SLOTS[i])));
 						aPlayer.setItemSlot(ARMOR_SLOTS[i], ST.nn(tStack));
 						temp = T;

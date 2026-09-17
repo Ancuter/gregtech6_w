@@ -116,44 +116,24 @@ public abstract class TileEntityBase05Inventories extends TileEntityBase04MultiT
 	@Override public void setChanged() {super.setChanged(); updateInventory();}
 	@Override public boolean isEmpty() {return invempty();}
 	@Override public void clearContent() {for (int i = 0; i < mInventory.length; i++) slotKill(i);}
-	// F15-size0 (BUG-015 v2): allowZeroStacks-слот («тип запомнен, штук 0», 1.7.10 stackSize=0) хранится как
-	// ZEROSIZE-призрак (count=1+маркер, ST.size_(0)) — физический count=0 слеп для ВСЕХ neo-чтений (copy/getItem/equal).
-	// Логический размер — ST.count; изъятие из призрака = пусто (1.7.10 возвращал size0-стек = «ноль предметов»).
+	// A zero-count slot is stored as a ZEROSIZE ghost (physical count=1 plus a marker), since a real count=0 is
+	// invisible to every neo read; the logical size comes from ST.count, and extracting from a ghost yields nothing.
 	@Override public ItemStack removeItem(int aSlot, int aDecrement) {updateInventory(); if (mInventory[aSlot] == null || aDecrement <= 0 || ST.count(mInventory[aSlot]) <= 0) return NI; if (ST.count(mInventory[aSlot]) <= aDecrement) {ItemStack tStack = ST.copy(mInventory[aSlot]); if (allowZeroStacks(aSlot)) ST.size_(0, mInventory[aSlot]); else mInventory[aSlot] = NI; return tStack;} ItemStack rStack = mInventory[aSlot].split(aDecrement); if (mInventory[aSlot].getCount() <= 0 && !allowZeroStacks(aSlot)) mInventory[aSlot] = NI; return rStack;}
 	@Override public ItemStack removeItemNoUpdate(int aSlot) {ItemStack rStack = mInventory[aSlot]; mInventory[aSlot] = null; return rStack;}
-	// F-loot (заход данжей #39, живой тест «почти все сундуки пустые»): neo-контракт Container.getItem — НИКОГДА
-	// не null (движок зовёт .isEmpty() без гейта: LootTable.getAvailableSlots:206; тот же класс и фикс, что
-	// DummyInventory волны 1). Прежний 1.7.10-возврат null ронял NPE внутри LootTable.fill(this) у сундуков данжа
-	// (MultiTileEntityChest.generateDungeonLoot передаёт Container=сам BE) → generateLoot=F → сундук пуст навсегда.
-	// Контракт бьёт и по ванильным потребителям (хопперы/компараторы) ЛЮБОГО GT-инвентаря. Внутреннее хранение
-	// mInventory остаётся null-able (1:1 — весь GT-код работает с ним напрямую и через ST.valid/invalid, EMPTY-aware).
-	// BUG-078 (стык с Jade): наружу ZEROSIZE-призрак («тип помню, штук 0») отдаётся ПУСТЫМ слотом.
-	// getItem — ванильный контракт Container для ЧУЖИХ читателей (Jade-провайдер содержимого, хопперы,
-	// компараторы); физически призрак хранится как count=1 + маркер, и всякий, кто читает count напрямую,
-	// видел единицу — Jade так и писал «1 шт.» у пустого хранилища. Логический размер даёт ST.count.
-	// Внутренний GT6-код это не затрагивает: он ходит в mInventory напрямую и через slot(...)/slotHas(...),
-	// поэтому память типа (витрина, режимы, выдача) остаётся на месте — снаружи же ноль честно выглядит нулём.
+	// neo's Container.getItem contract must never return null, since the engine calls .isEmpty() ungated; the old
+	// null return crashed dungeon chest loot, and a ZEROSIZE ghost now reports outward as empty, fixing readers like Jade.
 	@Override public ItemStack getItem(int aSlot) {
 		ItemStack tStack = mInventory[aSlot];
 		if (tStack == null) return ItemStack.EMPTY;
 		return allowZeroStacks(aSlot) && ST.count(tStack) <= 0 ? ItemStack.EMPTY : tStack;
 	}
 
-	/** F15/F-break (NPE игрока 2026-07-19 при ломании MTE): neo BlockEntity.preRemoveSideEffects (BlockEntity.java:264-268)
-	 *  сам вытряхивает любой Container через Containers.dropContents — НОВОЕ поведение движка (в 1.7.10 дроп содержимого
-	 *  делал ТОЛЬКО сам мод в breakBlock). GT6-инвентарь держит null-слоты (F15 null-модель) → vanilla dropItemStack NPE;
-	 *  плюс двойной дроп с GT6-путём (IMTE_BreakBlock.breakBlock → MultiTileEntityBlock.breakBlock:205). Дроп владеет GT6. */
-	/** РЕПОРТ ИГРОКА («положил 4 батареи в батарейный бокс и разрушил его — выпал только бокс, батареи исчезли;
-	 *  касается всех машин GT6»): вытряхивание содержимого было потеряно ЦЕЛИКОМ — с обеих сторон сразу.
-	 *  Ванильное (Containers.dropContents) заглушено здесь осознанно (см. выше: null-слоты GT6 роняют его NPE, и
-	 *  был бы двойной дроп), а GT6-путь `MultiTileEntityBlock.breakBlock → IMTE_BreakBlock.breakBlock` остался БЕЗ
-	 *  ВЫЗЫВАТЕЛЯ: в 1.7.10 его звал движковый `Block.breakBlock(World,x,y,z,Block,meta)`, а в neo такого хука нет
-	 *  (замер: 0 вызовов `breakBlock(aWorld…)` по всему дереву, `onRemove`/`affectNeighborsAfterRemoval` у MTE-блока
-	 *  не переопределены). Тело дропа при этом ЦЕЛО и 1:1 (breakBlock() ниже, со своими правилами canDrop/breakDrop/
-	 *  debug-стеков) — не хватало только моста. Мост здесь: этот хук движок зовёт ровно там, где ваниль вытряхивает
-	 *  содержимое, поэтому дроп по-прежнему принадлежит GT6, а не ванили. */
+	/** neo's preRemoveSideEffects now drops a Container's contents itself via Containers.dropContents, unlike 1.7.10
+	 *  where only the mod did; GT6's null slots would crash that dropper and double-drop besides, so drop stays owned by GT6. */
+	/** Player report: breaking a machine dropped the block but not its contents, on both sides at once. Vanilla's
+	 *  dropContents is suppressed deliberately above, and GT6's own drop path lost its caller when that engine hook vanished. */
 	@Override public void preRemoveSideEffects(net.minecraft.core.BlockPos aPos, net.minecraft.world.level.block.state.BlockState aState) {
-		try {breakBlock();} catch (Throwable e) {e.printStackTrace(gregapi.data.CS.ERR);} // дроп содержимого не должен ронять удаление блока
+		try {breakBlock();} catch (Throwable e) {e.printStackTrace(gregapi.data.CS.ERR);} // content drop must not break block removal
 	}
 	public String getInventoryName() {String rName = getCustomName(); if (UT.Code.stringValid(rName)) return rName; MultiTileEntityRegistry tRegistry = MultiTileEntityRegistry.getRegistry(getMultiTileEntityRegistryID()); return tRegistry==null?getClass().getName():tRegistry.getLocal(getMultiTileEntityID());}
 	@Override public int getContainerSize() {return mInventory==null?0:mInventory.length;}
@@ -164,7 +144,7 @@ public abstract class TileEntityBase05Inventories extends TileEntityBase04MultiT
 	public boolean allowZeroStacks(int aSlot) {return F;}
 	public ItemStack[] getInventory() {return mInventory;}
 	public void setInventory(ItemStack[] aInventory) {mInventory = aInventory;}
-	public void removeAllDroppableNullStacks() {for (int i = 0; i < mInventory.length; i++) if (canDrop(i) && mInventory[i] != null && ST.count(mInventory[i]) <= 0) mInventory[i] = NI;} // F15-size0: ZEROSIZE-призрак (физ. count=1) — тоже «мёртвый» стек, НЕ дропать (иначе дюп при ломании)
+	public void removeAllDroppableNullStacks() {for (int i = 0; i < mInventory.length; i++) if (canDrop(i) && mInventory[i] != null && ST.count(mInventory[i]) <= 0) mInventory[i] = NI;} // A ZEROSIZE ghost (count=1) is also a dead stack, don't drop it (or breaking would duplicate it).
 	
 	public abstract boolean canDrop  (int aSlot);
 	public          boolean keepSlot (int aSlot) {return F;}

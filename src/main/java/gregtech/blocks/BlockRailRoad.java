@@ -79,9 +79,8 @@ public class BlockRailRoad extends BlockBaseRail {
 		// NO-OP
 	}
 
-	// BUG-047: 1:1 с 1.7.10 — onBlockAdded/func_150052_a у рода NO-OP (дорожная разметка НЕ выравнивается по соседям
-	// и не имеет детектора) — гасим vanilla-выравнивание моста BlockBaseRail.onPlace. Бит 8 = вариант разметки, форма
-	// ставится только placement'ом (мета 0/1/8/9) и резчиками (toggle ^8) — мост меты наследуется.
+	// 1:1 with 1.7.10: road markings never align to neighbors or have a detector, so the vanilla-alignment
+	// bridge from BlockBaseRail.onPlace is suppressed here; shape only comes from placement meta or the shears' toggle.
 	@Override protected void onPlace(net.minecraft.world.level.block.state.BlockState aState, Level aWorld, BlockPos aPos, net.minecraft.world.level.block.state.BlockState aOldState, boolean aMovedByPiston) {/* NO-OP */}
 	
 	
@@ -135,7 +134,7 @@ public class BlockRailRoad extends BlockBaseRail {
 			aX += OFFX[aSide]; aY += OFFY[aSide]; aZ += OFFZ[aSide];
 		}
 		
-		if (!(aPlayer).mayUseItemAt(new BlockPos(aX, aY, aZ), FORGE_DIR[aSide], aStack) || (aY == WD.maxY(aWorld) && getMaterial().isSolid()) /* BUG-089: было aY == 255 — верх мира через центр F6-Y-scale */ || !WD.canPlaceEntityOnSide(aWorld, this, aX, aY, aZ, F, aSide, aPlayer, aStack)) return F;
+		if (!(aPlayer).mayUseItemAt(new BlockPos(aX, aY, aZ), FORGE_DIR[aSide], aStack) || (aY == WD.maxY(aWorld) && getMaterial().isSolid()) /* the world ceiling now comes from the single Y-scale center, not a hardcoded 255 */ || !WD.canPlaceEntityOnSide(aWorld, this, aX, aY, aZ, F, aSide, aPlayer, aStack)) return F;
 		
 		if (aItem.placeBlockAt(aStack, aPlayer, aWorld, aX, aY, aZ, aSide, aHitX, aHitY, aHitZ, SIDES_AXIS_X[UT.Code.getHorizontalForPlayerPlacing(aPlayer)] ? aHitZ > 0.5 ? 9 : 1 : aHitX > 0.5 ? 8 : 0)) {
 			WD.playStepSound(aWorld, aX+0.5F, aY+0.5F, aZ+0.5F, this);

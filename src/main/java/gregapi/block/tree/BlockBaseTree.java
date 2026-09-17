@@ -53,12 +53,8 @@ public abstract class BlockBaseTree extends BlockBaseMeta {
 	public abstract int getLeavesRangeYPos(byte aMeta);
 	public abstract int getLeavesRangeYNeg(byte aMeta);
 	
-	// Подключение канала «блок снят — тронь соседей» (2026-07-30, реестр мёртвых каналов).
-	// 1.7.10 breakBlock(World,x,y,z,Block,meta) → neo BlockBehaviour.affectNeighborsAfterRemoval(BlockState,
-	// ServerLevel,BlockPos,boolean) (BlockBehaviour.java:170; зовётся движком после снятия блока,
-	// BlockStateBase:748). Без моста тело ниже не звалось НИКЕМ: срубленный ствол GT6 не запускал распад
-	// листвы вокруг — листья оставались висеть в воздухе. Подтип берём тем же центром мета↔BlockState, что и
-	// остальной порт (IBlockExtendedMetaData), а не своим разбором свойств.
+	// Bridges 1.7.10 breakBlock(World,x,y,z,Block,meta) to affectNeighborsAfterRemoval so a felled trunk
+	// still triggers leaf decay around it; subtype comes from the shared meta<->BlockState center.
 	@Override protected void affectNeighborsAfterRemoval(net.minecraft.world.level.block.state.BlockState aState, net.minecraft.server.level.ServerLevel aLevel, BlockPos aPos, boolean aMovedByPiston) {
 		breakBlock(aLevel, aPos.getX(), aPos.getY(), aPos.getZ(), aState.getBlock(), getExtendedMetaData(aState));
 	}
@@ -66,17 +62,14 @@ public abstract class BlockBaseTree extends BlockBaseMeta {
 	// @Override
 	public void breakBlock(Level aWorld, int aX, int aY, int aZ, Block aBlock, int aMeta) {
 		int tRangeSide = getLeavesRangeSide((byte)aMeta)+1, tRangeYNeg = getLeavesRangeYNeg((byte)aMeta)+1, tRangeYPos = getLeavesRangeYPos((byte)aMeta)+1;
-		// было World.checkChunksExist(x0,y0,z0,x1,y1,z1) (асимметричный диапазон по осям) -> ILevelReaderExtension.
-		// isAreaLoaded(BlockPos,int) [ILevelReaderExtension.java:19] принимает только симметричный радиус - берём
-		// максимум из трёх диапазонов (безопасный супер-набор: требует загрузки НЕ МЕНЬШЕ области, чем исходно
-		// проверялась, тот же приём, что и BlockBase/PrefixBlock.checkGravity ±32).
+		// isAreaLoaded takes only a symmetric radius, so the max of the three original ranges is used as a safe
+		// superset that never loads less area than the asymmetric check it replaces.
 		if (!aWorld.isClientSide() && aWorld.isAreaLoaded(new BlockPos(aX, aY, aZ), Math.max(tRangeSide, Math.max(tRangeYNeg, tRangeYPos)))) {
 			tRangeSide--; tRangeYNeg--; tRangeYPos--;
 			for (int i = -tRangeSide; i <= tRangeSide; ++i) for (int j = -tRangeYNeg; j <= tRangeYPos; ++j) for (int k = -tRangeSide; k <= tRangeSide; ++k) {
 				Block tBlock = WD.block(aWorld, aX + i, aY + j, aZ + k);
-				// F13 functional-adapted: 1.7.10 Block.beginLeavesDecay(World,x,y,z) — generic Block-хук, удалён из neo. Реальную
-				// GT6-логику несёт только BlockBaseLeaves (плоский метод) → маршрутизируем instanceof'ом; vanilla-листва
-				// распадается своим tick-механизмом (в этом поке не нуждается). Не заглушка: GT6-логика вызывается.
+				// beginLeavesDecay is gone as a generic Block hook in neo; GT6 logic lives only on BlockBaseLeaves,
+				// so it is routed there by instanceof while vanilla leaves keep their own tick-based decay.
 				if (WD.leaves(tBlock, aWorld, aX + i, aY + j, aZ + k) && tBlock instanceof BlockBaseLeaves) ((BlockBaseLeaves)tBlock).beginLeavesDecay(aWorld, aX + i, aY + j, aZ + k);
 			}
 		}

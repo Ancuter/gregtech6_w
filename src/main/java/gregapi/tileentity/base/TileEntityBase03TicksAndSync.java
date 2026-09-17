@@ -55,28 +55,16 @@ public abstract class TileEntityBase03TicksAndSync extends TileEntityBase02Adjac
 	/** @return a Packet containing all Data which has to be synchronised to the Client */
 	public abstract IPacket getClientDataPacket(boolean aSendAll);
 	
-	/**
-	 * ПРОИЗВОДНЫЕ ДАННЫЕ ОБЛИКА, которые едут клиенту (что лежит на наковальне, что налито в ящике бутылей,
-	 * какие книги на полке). Реализация обязана быть ЧИСТЫМ пересчётом из собственного состояния —
-	 * без переноса предметов, звуков и прочих побочных действий: центр зовёт её перед КАЖДОЙ сборкой снимка.
-	 *
-	 * <p>Зачем канал вообще нужен (Issue #1 «предмет на наковальне не отображается»). Облик считался
-	 * ТОЛЬКО в тике блок-энтити ({@code onTick2} под {@code mInventoryChanged}), и оттуда же уходил клиенту.
-	 * В движке 26 блок-энтити НЕ ТИКАЕТ, пока чанк вне зоны симуляции ({@code LevelChunk.isTicking:417-423}
-	 * → {@code ServerLevel.shouldTickBlocksAt:480} → {@code inBlockTickingRange}), а ВИДИМ он при этом
-	 * остаётся: зоны видимости и симуляции в 26 раздельны, и видимость обычно больше. Замер стенда
-	 * {@code gt6anvilsync} (этап 4): в слоте 14 слитков, {@code mMaterialA=0}, таймер BE 0→0 — сервер сам
-	 * не знал, что рисовать, и клиент получал пустую наковальню. Теперь облик считается в момент, когда
-	 * снимок собирается, и от тика не зависит вовсе.
-	 */
+	/** Visual-only derived state (anvil contents, jar liquid, shelf books) that must be a pure recompute with no
+	 *  side effects, since block entities stopped ticking outside the simulation range while staying visible. */
 	public void updateVisualData() {/**/}
 
 	/** Sends all Data to the Clients in Range */
 	public void sendClientData(boolean aSendAll, ServerPlayer aPlayer) {
-		if (mSendingClientData) return; // защита от возврата: пересчёт облика ниже сам зовёт updateClientData
+		if (mSendingClientData) return; // defense against reentrancy: the visual recompute below calls back into the sync path itself
 		mSendingClientData = T;
-		// Снимок обязан нести АКТУАЛЬНЫЙ облик, а не тот, что успел посчитать тик (его может не быть вовсе).
-		try {updateVisualData();} catch (Throwable e) {e.printStackTrace(ERR);} // пересчёт облика не должен рвать синк
+		// The snapshot must carry the current visual state, not whatever the tick last computed, since it may not have run.
+		try {updateVisualData();} catch (Throwable e) {e.printStackTrace(ERR);} // a failed visual recompute must not break the sync
 		try {
 		if (aPlayer == null) {
 			IPacket tPacket = getClientDataPacket(aSendAll);
@@ -87,12 +75,8 @@ public abstract class TileEntityBase03TicksAndSync extends TileEntityBase02Adjac
 				getNetworkHandlerNonOwned().sendToAllPlayersInRangeExcept(tPacket, mOwner, level, getCoords());
 			}
 		} else {
-			// ПЕРСОНАЛЬНЫЙ СНИМОК ВОШЕДШЕМУ ИГРОКУ ШЛЁТСЯ ВСЕГДА. Прежде здесь стоял гейт `!mSendClientData`
-			// («раз рассылка всем и так запланирована, персонально не шлём»), и он держался на допущении, что
-			// блок-энтити обязательно оттикает и разошлёт. В 26 это неверно: у нетикающего чанка флаг
-			// mSendClientData взводится при каждой привязке BE к чанку (LevelChunk.setBlockEntity:449 →
-			// clearRemoved → updateClientData) и не сбрасывается никогда — значит вошедший игрок не получал
-			// снимок вовсе. Цена снятия — изредка второй такой же пакет; снимок идемпотентен.
+			// The personal snapshot to an entering player is now always sent; the old !mSendClientData gate assumed a
+			// block entity always ticks and broadcasts, but a non-ticking chunk never clears that flag, so it never fired.
 			IPacket tPacket = getClientDataPacket(aSendAll);
 			if (mOwner == null) {
 				getNetworkHandler().sendToPlayer(tPacket, aPlayer);
@@ -116,19 +100,12 @@ public abstract class TileEntityBase03TicksAndSync extends TileEntityBase02Adjac
 	public INetworkHandler getNetworkHandler() {return NW_API;}
 	public INetworkHandler getNetworkHandlerNonOwned() {return NW_AP2;}
 	
-	/** Защита от возврата в отправку: {@link #sendClientData} пересчитывает облик, а пересчёт у части
-	 *  носителей сам зовёт {@link #updateClientData} — без гейта это была бы рекурсия. */
+	/** Reentrancy guard: {@link #sendClientData} recomputes the look, and some owners' recompute calls
+	 *  {@link #updateClientData} itself. */
 	private boolean mSendingClientData = F;
 
-	/**
-	 * Called to send all Data to the close Clients.
-	 *
-	 * <p>Обычно достаточно взвести флаг: снимок уедет на ближайшем тике. Но у блока в чанке ВНЕ зоны
-	 * симуляции тика не будет вовсе ({@code LevelChunk.isTicking:417-423}), а измениться он может —
-	 * взаимодействие игрока и соседей от тика не зависит (положил слиток в наковальню в чанке, который
-	 * ещё не затикал: предмет лёг, а картинка осталась прежней и ждать её было бы нечего). Для таких
-	 * блоков снимок отправляется сразу.
-	 */
+	/** Called to send all data to nearby clients. A block outside the simulation zone never ticks, so flagging alone wouldn't
+	 *  help; such blocks send the snapshot immediately. */
 	public void updateClientData() {
 		mSendClientData = T;
 		if (mSendingClientData || !isServerSide() || level == null || WD.blockTicking(this)) return;
