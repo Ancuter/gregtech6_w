@@ -44,6 +44,9 @@ sourceSets.main.resources {
 // Keeps the core compiling while mod integration is DEFERRED. Returning to real integration means deleting
 // this directory and wiring up the real dependencies — in ONE place. Analogous to the oracle's compileOnly dev-jars.
 sourceSets.main.java.srcDir('src/compat-mirror/java')
+// Mods present at runtime as real jars (JEI, Jade, AE2, Ex Machina) compile against stand-ins declared here.
+// Those jars own the packages at runtime, so the set builds apart and never enters the mod's output or jar.
+sourceSets { provided { java.srcDir('src/compat-mirror/provided') } }
 
 // The -PcoreOnly mode was REMOVED together with the mass-compilation phase it served: it narrowed the
 // build to the core via two file lists, because the content layer didn't compile yet back then. The
@@ -154,30 +157,8 @@ tasks.withType(AbstractArchiveTask).configureEach {
 }
 
 repositories {
-    // Add here additional repositories if required by some of the dependencies below.
-
-    // JEI (mezz.jei) — recipe/item viewer for visual acceptance. Repository coordinates verified against AE2.
-    maven {
-        url = 'https://maven.blamejared.com/'
-        content { includeGroup 'mezz.jei' }
-    }
-
-    // Jade (the "what am I looking at" tooltip) is needed ONLY to compile the compatibility plugin
-    // (gregtech/compat/Compat_Jade.java): GT6 has its own harvest tools (wrench/crowbar/cutter/...),
-    // and Jade can accept them via HarvestToolProvider.registerHandler — but that requires
-    // implementing its ToolHandler interface, i.e. having the API on the compile classpath.
-    maven {
-        url = 'https://api.modrinth.com/maven'
-        content { includeGroup 'maven.modrinth' }
-    }
-
-    // Ex Machina is the rotation/signal graph library More Red is built on, and More Red already ships it
-    // inside its own jar, so only the API is needed here. A mirror under net.commoble.* would collide with
-    // that live jar the same way an appeng.* mirror does, so the real artifact is used instead.
-    maven {
-        url = 'https://maven.commoble.net/'
-        content { includeGroup 'net.commoble.exmachina' }
-    }
+    // No mod repositories: the build downloads only the platform (Gradle, NeoForge, Minecraft, their libraries).
+    // A foreign mod API compiles from src/compat-mirror/provided, a foreign mod jar comes from ../stands/_mods.
 }
 
 base {
@@ -278,6 +259,36 @@ neoForge {
         testedMod = mods."${mod_id}"
     }
 }
+neoForge.addModdingDependenciesTo(sourceSets.provided)
+
+// Local mode: NeoFormRuntime takes the game from the platform copy beside the repository instead of asking Mojang.
+// Its manifests under minecraft/resolved point every address at a file of that copy.
+if (gradle.platformCopy) {
+    neoFormRuntime.launcherManifestUrl = new File(gradle.platformCopy, 'minecraft/resolved/launcher_manifest.json').toURI().toString()
+    tasks.withType(net.neoforged.nfrtgradle.DownloadAssets).configureEach {
+        doFirst {
+            if (!System.getenv('NFRT_ASSET_REPOSITORY')) {
+                throw new GradleException('Local mode starts through gradlew: it tells NeoFormRuntime where the game assets are.')
+            }
+        }
+    }
+}
+
+// Foreign mods are never fetched: they sit beside the repository, and a bare clone builds and runs GregTech alone.
+def localMods = file('../stands/_mods')
+def devRunMods = [
+    // JEI is the visual-acceptance viewer; Jade, JourneyMap, AE2 and More Red are what the compat stands query.
+    "jei-${jei_minecraft_version}-neoforge-${jei_version}.jar",
+    "jade-${jade_version}.jar",
+    "journeymap-${journeymap_version}.jar",
+    "ae2-${ae2_version}.jar",
+    "guideme-${guideme_version}.jar",
+    // Built from reference/mods/MoreRed-src (no 26.1.2 release exists); it carries Ex Machina inside.
+    "morered-26.1.2.3.jar",
+]
+// Sodium lights quads by vertex index, so only under it does a vertex-order defect show; render acceptance only.
+if (project.hasProperty('gt6probes')) devRunMods << 'sodium-neoforge-0.9.1-mc26.1.2.jar'
+def probeCompileMods = (devRunMods + ["exmachina-${exmachina_version}.jar"]).collect { new File(localMods, it) }
 
 // Sets up a dependency configuration called 'localRuntime'.
 // This configuration should be used instead of 'runtimeOnly' to declare
@@ -288,58 +299,16 @@ configurations {
 }
 
 dependencies {
-    // JEI (the NEI equivalent) — a visual-acceptance tool. Coordinates verified against AE2, metadata resolves.
-    // The compileOnly lines are temporarily commented out: downloading the jar from maven.blamejared.com times
-    // out in this environment, and on the compileClasspath they BLOCK core compilation (which doesn't import
-    // JEI yet — no plugins exist yet). Uncomment when writing GregTech6's JEI plugins / once the network to
-    // blamejared is stable. localRuntime is kept (it's on the runtime path and doesn't touch compilation;
-    // it pulls in the full JEI when the game launches for visual acceptance).
-    compileOnly "mezz.jei:jei-${jei_minecraft_version}-common-api:${jei_version}"
-    compileOnly "mezz.jei:jei-${jei_minecraft_version}-neoforge-api:${jei_version}"
-    localRuntime "mezz.jei:jei-${jei_minecraft_version}-neoforge:${jei_version}"
-
-    // Jade — compileOnly ONLY: the compatibility plugin (gregtech/compat/Compat_Jade.java) implements its
-    // ToolHandler interface to show GT6's REAL harvest tools (wrench on machines, crowbar, cutter), which
-    // can't be expressed via vanilla tags. Jade is not pulled into the player's jar; without Jade the plugin
-    // class simply doesn't load (Jade looks up @WailaPlugin itself), so production code does NOT reference it.
-    compileOnly "maven.modrinth:jade:${jade_version}"
-    // localRuntime — so the gt6jadeprobe stand can query the REAL Jade via the same call it uses to draw the
-    // tooltip (HarvestToolProvider.getTool). Doesn't affect the player's jar: localRuntime is dev-run-only.
-    localRuntime "maven.modrinth:jade:${jade_version}"
-
-    // JourneyMap (MODCOMPAT-002) — ONLY for the gt6jmprobe stand: the judge queries the REAL JourneyMap via
-    // the same channel it uses to decide a block's fate on the map (BlockMD.get → isIgnore/getTextureColor/
-    // getAlpha; decompile reference: journeymap-decompiled/). Production code does NOT reference it; the
-    // mod's sources are closed (ARR), so compileOnly comes from the same Modrinth maven as Jade.
-    compileOnly "maven.modrinth:journeymap:${journeymap_version}"
-    localRuntime "maven.modrinth:journeymap:${journeymap_version}"
-
-    // Applied Energistics 2 (mission "GT6 ⇄ AE2 compatibility layer", stage E0). GT6 has known AE2 since
-    // 1.7.10: gregtech/compat/Compat_Recipes_AppliedEnergistics.java defines presses, cutting, sky stone;
-    // MD.AE.mLoaded guards all these paths. Same approach as Jade/JourneyMap — Modrinth maven, compileOnly + localRuntime.
-    // ⚠ THE appeng.* PACKAGE NOW BELONGS TO THIS JAR. The src/compat-mirror/java/appeng/ mirrors were removed (E0):
-    // ModuleClassLoader.java:76-78 (fml) does packageLookup.put(pk, moduleInfo) — when a package collides
-    // between two modules, one SILENTLY overwrites the other, and traversal order is nondeterministic. New
-    // mirrors must NOT be placed under appeng.*: the code must talk to the real AE2 API.
-    compileOnly "maven.modrinth:ae2:${ae2_version}"
-    localRuntime "maven.modrinth:ae2:${ae2_version}"
-    // GuideME — a mandatory AE2 dependency (its neoforge.mods.toml: modId="guideme"); the Modrinth maven's
-    // pom carries no transitive dependencies, so it's declared here. Runtime only: our code doesn't touch it.
-    localRuntime "maven.modrinth:guideme:${guideme_version}"
-
-    // More Red (modid "morered") — RedPower's successor: 16-channel wires, logic plates. Needed by the
-    // redstone compatibility stands: the judge queries the REAL mod via the same channel it uses to hand a
-    // signal to a neighbor. Same approach as Jade/AE2, but the source is local: no 26.1.2 build was ever
-    // published to maven, the artifact was built from reference/mods/MoreRed-src (see stands/_mods/PASSPORT.md).
-    // localRuntime only: production code doesn't reference the mod, and it doesn't reach the player's jar.
-    localRuntime files("../stands/_mods/morered-26.1.2.3.jar")
-    // Sodium — a third-party chunk-rendering pipeline, needed ONLY for render acceptance: it has no
-    // coordinate-based lighter of its own, it spreads lighting by quad vertex index, and only under it does
-    // a vertex-order mismatch against the vanilla canon become visible. Not wired in at all outside -Pgt6probes.
-    if (project.hasProperty('gt6probes')) localRuntime files("../stands/_mods/sodium-neoforge-0.9.1-mc26.1.2.jar")
-    // compileOnly only: Ex Machina reaches the game inside the More Red jar and never enters the player's
-    // jar. EnergyCompat needs the API to speak to foreign rotation, as its IC2 and RF branches already do.
-    compileOnly "net.commoble.exmachina:exmachina:${exmachina_version}"
+    // Stands read mod internals the stand-ins leave out, so under -Pgt6probes everything compiles against real jars.
+    if (project.hasProperty('gt6probes')) {
+        compileOnly files(probeCompileMods)
+    } else {
+        compileOnly sourceSets.provided.output
+    }
+    def devRunJars = devRunMods.collect { new File(localMods, it) }
+    // A mistyped file name would otherwise start the game without the mod and without a word.
+    if (localMods.isDirectory()) devRunJars.findAll { !it.isFile() }.each { logger.lifecycle("[mods] absent from ${localMods.name}, runs go without it: ${it.name}") }
+    localRuntime files(devRunJars.findAll { it.isFile() })
 
     // Example mod dependency using a mod jar from ./libs with a flat dir repository
     // This maps to ./libs/coolmod-${mc_version}-${coolmod_version}.jar
