@@ -284,7 +284,7 @@ def devRunMods = [
     "ae2-${ae2_version}.jar",
     "guideme-${guideme_version}.jar",
     // Built from reference/mods/MoreRed-src (no 26.1.2 release exists); it carries Ex Machina inside.
-    "morered-26.1.2.3.jar",
+    "morered-${morered_version}.jar",
 ]
 // Sodium lights quads by vertex index, so only under it does a vertex-order defect show; render acceptance only.
 if (project.hasProperty('gt6probes')) devRunMods << 'sodium-neoforge-0.9.1-mc26.1.2.jar'

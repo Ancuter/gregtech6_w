@@ -81,3 +81,9 @@ scratchpad/
 ### PASSPORT.md documents this working copy for an agent developing here: where things live,
 ### how to build, and where the reference material is; it says nothing about the shipped mod.
 /PASSPORT.md
+
+### Agent tooling of this working copy (a code index, its hooks and search settings); not part of the product.
+/graft/
+/.claude/
+/.mcp.json
+/.ignore
